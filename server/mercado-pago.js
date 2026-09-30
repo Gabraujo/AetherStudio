@@ -16,6 +16,14 @@ export async function createCheckoutPreference({ order, items, buyer, shippingAd
     throw error;
   }
 
+  const preferenceStartsAt = new Date(Date.now() - 1_000).toISOString();
+  const preferenceExpiresAt = new Date(order.reservation_expires_at).toISOString();
+  if (!Number.isFinite(Date.parse(preferenceExpiresAt)) || Date.parse(preferenceExpiresAt) <= Date.now()) {
+    const error = new Error('A reserva do pedido expirou antes da abertura do pagamento.');
+    error.status = 409;
+    throw error;
+  }
+
   const response = await fetch(`${API_ROOT}/checkout/preferences`, {
     method: 'POST',
     headers: {
@@ -24,6 +32,9 @@ export async function createCheckoutPreference({ order, items, buyer, shippingAd
       'X-Idempotency-Key': order.id,
     },
     body: JSON.stringify({
+      expires: true,
+      expiration_date_from: preferenceStartsAt,
+      expiration_date_to: preferenceExpiresAt,
       external_reference: order.id,
       items: items.map((item) => ({
         id: item.product_id,

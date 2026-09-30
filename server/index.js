@@ -361,9 +361,9 @@ app.post('/api/orders', requireUser, async (req, res) => {
         await client.query('UPDATE products SET stock = stock - $2, updated_at = NOW() WHERE id = $1', [product.id, line.quantity]);
       }
 
-      await client.query(
+      const { rows: [insertedOrder] } = await client.query(
         `INSERT INTO orders (id, user_id, total_cents, shipping_address)
-         VALUES ($1, $2, $3, $4)`,
+         VALUES ($1, $2, $3, $4) RETURNING reservation_expires_at`,
         [orderId, req.user.id, totalCents, JSON.stringify(data.shippingAddress)],
       );
       for (const { product, quantity } of orderItems) {
@@ -373,7 +373,7 @@ app.post('/api/orders', requireUser, async (req, res) => {
           [randomUUID(), orderId, product.id, product.name, quantity, product.price_cents],
         );
       }
-      return { order: { id: orderId, total_cents: totalCents }, items: orderItems.map(({ product, quantity }) => ({
+      return { order: { id: orderId, total_cents: totalCents, reservation_expires_at: insertedOrder.reservation_expires_at }, items: orderItems.map(({ product, quantity }) => ({
         product_id: product.id,
         product_name: product.name,
         quantity,
