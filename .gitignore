@@ -1,0 +1,20 @@
+# Environment secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+
+# Local data and logs
+*.log
+uploads/
+data/
+backups/
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.vscode/
