@@ -41,7 +41,7 @@ Configure a notificação **payment** no painel Mercado Pago para `https://seudo
 
 ## Produção em VPS com domínio
 
-1. Na HypeHost, escolha uma VPS Linux com acesso root, endereço IPv4 público e portas TCP 80/443 liberadas. O plano KVM 6GB listado atualmente tem 2 vCPUs, 6 GB de RAM e 60 GB SSD, acima do mínimo deste projeto; selecione Ubuntu 24.04 no provisionamento. Confira as condições e o preço vigentes na [página de VPS Linux da HypeHost](https://hypehost.com.br/vps-linux).
+1. Na HypeHost, escolha uma VPS Linux com acesso root, endereço IPv4 público e portas TCP 80/443 liberadas. O plano KVM 6GB é uma opção inicial adequada para esta loja e a página informa 6 GB de RAM e 60 GB SSD; selecione Ubuntu 24.04 no provisionamento e confira as condições vigentes na [página de VPS Linux da HypeHost](https://hypehost.com.br/vps-linux).
 2. Registre um domínio se ainda não tiver um e aponte os registros DNS `A` do domínio principal e de `www` para o IPv4 da VPS. Só crie `AAAA` se for configurar o IPv6 informado pelo provedor.
 3. Instale Docker Engine e o plugin Docker Compose na VPS usando o [guia oficial para Ubuntu](https://docs.docker.com/engine/install/ubuntu/). O acesso root da VPS Linux permite instalar Docker; a HypeHost lista Ubuntu 24.04 entre os sistemas disponíveis.
 4. Faça commit e push da versão revisada para o GitHub antes de cloná-la na VPS; confira que o remoto inclui `Dockerfile`, `docker-compose.yml` e `server/`. Não envie `.env`, `node_modules`, `uploads` ou backups ao GitHub.
