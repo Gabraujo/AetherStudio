@@ -5,7 +5,7 @@ import AdminPanel from './AdminPanel.jsx';
 import { api } from './api.js';
 import './style.css';
 
-const categories = ['Todas', 'Anime', 'Games', 'Quadrinhos', 'Promoções'];
+const categories = ['Todas', 'Anime', 'Games', 'Quadrinhos', 'Filmes', 'Outros', 'Promoções'];
 const money = (cents) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const statusLabel = {
   pending_payment: 'Aguardando pagamento',
