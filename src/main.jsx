@@ -15,6 +15,33 @@ const statusLabel = {
   checkout_error: 'Pagamento não iniciado',
 };
 
+class AppErrorBoundary extends React.Component {
+  state = { hasError: false, error: null };
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error('[aether] Interface render failed:', error, info.componentStack);
+  }
+
+  render() {
+    if (!this.state.hasError) return this.props.children;
+
+    return <main className="error-page" role="alert">
+      <a href="/" className="error-brand">AETHER</a>
+      <section>
+        <span className="eyebrow">AETHER STUDIO</span>
+        <h1>NÃ£o foi possÃ­vel carregar a loja.</h1>
+        <p>Recarregue a pÃ¡gina para tentar novamente. Se o problema continuar, volte em alguns minutos.</p>
+        {import.meta.env.DEV && <pre>{this.state.error?.message}</pre>}
+        <button className="outline-button" onClick={() => window.location.reload()}>Tentar novamente</button>
+      </section>
+    </main>;
+  }
+}
+
 function readCart(key) {
   try {
     const cart = JSON.parse(localStorage.getItem(`aether-cart:${key}`) || '[]');
@@ -283,4 +310,4 @@ function App() {
   </>;
 }
 
-createRoot(document.getElementById('root')).render(<App/>);
+createRoot(document.getElementById('root')).render(<AppErrorBoundary><App/></AppErrorBoundary>);
