@@ -68,7 +68,7 @@ export async function createCheckoutPreference({ order, items, buyer, shippingAd
 
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result.id || !result.init_point) {
-    console.error('[aether] Mercado Pago preference error:', result);
+    console.error(`[aether] Mercado Pago preference rejected (${response.status}).`);
     const error = new Error('Não foi possível iniciar o pagamento. Tente novamente em instantes.');
     error.status = 502;
     throw error;

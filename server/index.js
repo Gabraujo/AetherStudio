@@ -394,7 +394,12 @@ app.post('/api/orders', requireUser, async (req, res) => {
     await pool.query('UPDATE orders SET payment_preference_id = $2, updated_at = NOW() WHERE id = $1', [orderId, preference.id]);
     return res.status(201).json({ orderId, checkoutUrl: preference.url });
   } catch (error) {
-    console.error(`[aether] Checkout preference could not be confirmed for order ${orderId}; the stock reservation expires automatically.`);
+    try {
+      await releaseReservation(orderId, 'checkout_error');
+    } catch (releaseError) {
+      console.error(`[aether] Could not release stock for failed checkout ${orderId}:`, releaseError.message);
+    }
+    console.error(`[aether] Checkout preference could not be confirmed for order ${orderId}.`);
     throw error;
   }
 });
