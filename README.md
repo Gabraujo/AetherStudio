@@ -33,7 +33,7 @@ Na primeira execução, o script prepara segredos em `.env`, solicita a senha in
 
 Para parar os containers, rode `docker compose -f docker-compose.local.yml down`. Para iniciar novamente, execute o script outra vez. Evite `down -v`, que remove os volumes com seu banco e as imagens. A porta local `3000` fica acessível apenas pela própria máquina.
 
-O pagamento real permanece desativado sem as credenciais do Mercado Pago. Webhooks de pagamento não conseguem acessar `localhost`; para testar o ciclo completo com credenciais de teste, use uma URL HTTPS pública temporária e cadastre-a nos webhooks de teste do Mercado Pago. Nunca use credenciais de produção durante a simulação.
+O pagamento real permanece desativado sem as credenciais do Mercado Pago. Webhooks de pagamento não conseguem acessar `localhost`; para testar o ciclo completo, use credenciais de teste e uma URL HTTPS pública temporária. Defina essa URL em `AETHER_PUBLIC_URL`, `MP_ACCESS_TOKEN` e `MP_WEBHOOK_SECRET` no `.env`, abra a loja pela mesma URL pública e cadastre `https://sua-url-temporaria/api/payments/webhook` nos webhooks de teste do Mercado Pago. Depois recrie o app com `docker compose -f docker-compose.local.yml up -d --build --force-recreate app`. Nunca use credenciais de produção durante a simulação.
 
 ## Conta administradora
 

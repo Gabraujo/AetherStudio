@@ -24,7 +24,7 @@ services:
     environment:
       NODE_ENV: development
       PORT: 3000
-      APP_URL: http://localhost:3000
+      APP_URL: ${AETHER_PUBLIC_URL:-http://localhost:3000}
       SESSION_SECRET: ${SESSION_SECRET:?Configure SESSION_SECRET in .env}
       SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-aether.sid}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-aetherstudio.figures@gmail.com}
