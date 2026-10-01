@@ -21,6 +21,20 @@ O script preserva os segredos já definidos no `.env`. Se o Docker não estiver 
 
 O servidor da API roda na porta 3000; o Vite encaminha `/api` para ele. A sessão fica em uma tabela PostgreSQL e usa cookie `HttpOnly`, `SameSite=Lax` e `Secure` em produção. Senhas são armazenadas como hashes bcrypt. Os pedidos guardam uma cópia do nome e preço das figures para preservar o histórico.
 
+### Simulação completa em Docker
+
+Para experimentar a mesma imagem conteinerizada usada no deploy sem instalar Node.js ou npm no Windows, instale o [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/) e aguarde o mecanismo ficar em execução. Na pasta do projeto, abra o PowerShell e rode:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-docker-local.ps1
+```
+
+Na primeira execução, o script prepara segredos em `.env`, solicita a senha inicial do administrador e constrói/inicia a loja e o PostgreSQL. Acesse `http://localhost:3000` e entre com `aetherstudio.figures@gmail.com`. Cadastre figures de teste, carregue fotos, crie uma conta de cliente e confira o catálogo, sessões, carrinho e pedidos. Essa simulação usa banco e imagens em volumes Docker persistentes; parar os containers não apaga esses dados.
+
+Para parar os containers, rode `docker compose -f docker-compose.local.yml down`. Para iniciar novamente, execute o script outra vez. Evite `down -v`, que remove os volumes com seu banco e as imagens. A porta local `3000` fica acessível apenas pela própria máquina.
+
+O pagamento real permanece desativado sem as credenciais do Mercado Pago. Webhooks de pagamento não conseguem acessar `localhost`; para testar o ciclo completo com credenciais de teste, use uma URL HTTPS pública temporária e cadastre-a nos webhooks de teste do Mercado Pago. Nunca use credenciais de produção durante a simulação.
+
 ## Conta administradora
 
 O e-mail `aetherstudio.figures@gmail.com` é o único que recebe acesso de administração. A conta é criada pelo servidor com `ADMIN_BOOTSTRAP_PASSWORD`; não há cadastro público para esse e-mail. Depois do primeiro início bem-sucedido, apague `ADMIN_BOOTSTRAP_PASSWORD` do `.env` e entre pelo botão **Entrar**. O painel permite incluir, editar, publicar, arquivar/restaurar figures, informar preço, estoque, categoria e carregar imagens JPG, PNG ou WebP de até 5 MB. Também exibe os 200 pedidos mais recentes, com o status do pagamento, os dados do cliente e o endereço de entrega. As quatro peças usadas como referência visual são criadas como rascunhos sem estoque; revise preço, quantidade e foto antes de publicar. O arquivamento tira a figure da vitrine sem apagar referências dos pedidos.
