@@ -72,6 +72,7 @@ function App() {
   const [newsletterEmail, setNewsletterEmail] = useState('');
   const [newsletterDone, setNewsletterDone] = useState(false);
   const [address, setAddress] = useState({ street: '', number: '', district: '', city: '', state: '', postalCode: '' });
+  const [cepLookup, setCepLookup] = useState('idle');
 
   const cartKey = user?.id || 'guest';
   const count = cart.reduce((sum, item) => sum + item.quantity, 0);
@@ -114,6 +115,41 @@ function App() {
   useEffect(() => {
     setCart(readCart(cartKey));
   }, [cartKey]);
+
+  useEffect(() => {
+    const cep = address.postalCode.replace(/\D/g, '');
+    if (cep.length !== 8) {
+      setCepLookup('idle');
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    setCepLookup('loading');
+    fetch(`https://viacep.com.br/ws/${cep}/json/`, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error('Falha na consulta do CEP.');
+        return response.json();
+      })
+      .then((result) => {
+        if (result.erro) {
+          setCepLookup('not-found');
+          return;
+        }
+        setAddress((current) => ({
+          ...current,
+          street: result.logradouro || current.street,
+          district: result.bairro || current.district,
+          city: result.localidade || current.city,
+          state: result.uf || current.state,
+        }));
+        setCepLookup('success');
+      })
+      .catch((error) => {
+        if (error.name !== 'AbortError') setCepLookup('error');
+      });
+
+    return () => controller.abort();
+  }, [address.postalCode]);
 
   function saveCart(next) {
     setCart(next);
@@ -304,7 +340,7 @@ function App() {
 
         {modal==='account'&&<><div className="eyebrow">ÁREA DO CLIENTE</div><h2>Olá, {user?.name?.split(' ')[0]}<span>.</span></h2><p>{user?.email}</p>{user?.isAdmin&&<button className="add-button admin-open" onClick={()=>setModal('admin')}>Abrir painel de catálogo <ArrowRight size={16}/></button>}<div className="account-section"><div className="account-section-heading"><h3>Meus pedidos</h3><span>{orders.length}</span></div>{orders.length===0?<p className="empty-orders">Seus pedidos e atualizações de pagamento aparecerão aqui.</p>:orders.map((order)=><article className="order-card" key={order.id}><div className="order-title"><b>Pedido #{order.id.slice(0,8).toUpperCase()}</b><span className={`order-status ${order.status}`}>{statusLabel[order.status]||order.status}</span></div><small>{new Date(order.createdAt).toLocaleDateString('pt-BR')} · {money(order.totalCents)}</small><div className="order-lines">{order.items.map((item,index)=><span key={`${order.id}-${index}`}>{item.quantity}× {item.productName}</span>)}</div><small className="order-address">Entrega: {order.shippingAddress.street}, {order.shippingAddress.number} · {order.shippingAddress.city}/{order.shippingAddress.state} · CEP {order.shippingAddress.postalCode}</small></article>)}<form className="password-form" onSubmit={changePassword}><h3>Segurança da conta</h3><label>Senha atual<input type="password" required value={currentPassword} onChange={event=>setCurrentPassword(event.target.value)} autoComplete="current-password"/></label><label>Nova senha<input type="password" required minLength="10" value={newPassword} onChange={event=>setNewPassword(event.target.value)} autoComplete="new-password"/></label><button className="secondary" disabled={busy}>{busy?'Salvando...':'Alterar senha'}</button></form><button className="text-button logout" onClick={logout}>Sair da conta</button></div></>}
 
-        {modal==='checkout'&&<><div className="eyebrow">ENTREGA</div><h2>Endereço de envio<span>.</span></h2><p>O frete é grátis. Revise o endereço antes de continuar ao Mercado Pago.</p><form className="login-form checkout-form" onSubmit={checkout}><label>CEP<input required inputMode="numeric" pattern="[0-9.\-]{8,10}" value={address.postalCode} onChange={(event)=>setAddress({...address,postalCode:event.target.value})} placeholder="00000-000"/></label><label>Rua<input required value={address.street} onChange={(event)=>setAddress({...address,street:event.target.value})} placeholder="Nome da rua"/></label><div className="checkout-row"><label>Número<input required value={address.number} onChange={(event)=>setAddress({...address,number:event.target.value})}/></label><label>Bairro<input value={address.district} onChange={(event)=>setAddress({...address,district:event.target.value})}/></label></div><label>Cidade<input required value={address.city} onChange={(event)=>setAddress({...address,city:event.target.value})}/></label><label>Estado (UF)<input required minLength="2" maxLength="2" value={address.state} onChange={(event)=>setAddress({...address,state:event.target.value.toUpperCase()})} placeholder="SP"/></label><div className="cart-total"><span>Total · frete grátis</span><b>{money(total)}</b></div><button className="add-button" disabled={busy||!paymentsEnabled}>{busy?'Preparando pagamento...':'Ir para pagamento seguro'}</button>{!paymentsEnabled&&<small className="checkout-note">Mercado Pago ainda precisa ser configurado no servidor.</small>}</form></>}
+        {modal==='checkout'&&<><div className="eyebrow">ENTREGA</div><h2>Endereço de envio<span>.</span></h2><p>O frete é grátis. Revise o endereço antes de continuar ao Mercado Pago.</p><form className="login-form checkout-form" onSubmit={checkout}><label>CEP<input required inputMode="numeric" autoComplete="postal-code" maxLength="9" pattern="[0-9]{5}-?[0-9]{3}" value={address.postalCode} onChange={(event)=>{const digits=event.target.value.replace(/\D/g,'').slice(0,8);setAddress((current)=>({...current,postalCode:digits.length>5?`${digits.slice(0,5)}-${digits.slice(5)}`:digits}));}} placeholder="00000-000" aria-describedby="cep-status"/>{cepLookup==='idle'?<small id="cep-status" className="cep-status">Ao completar o CEP, consultamos o ViaCEP para preencher os dados disponíveis.</small>:<small id="cep-status" className={`cep-status ${cepLookup}`} role="status" aria-live="polite">{cepLookup==='loading'?'Consultando endereço pelo CEP...':cepLookup==='success'?'Endereço localizado. Confira os dados e informe o número.':cepLookup==='not-found'?'CEP não encontrado. Confira o número ou preencha o endereço manualmente.':'Não foi possível consultar o CEP agora. Você pode preencher o endereço manualmente.'}</small>}</label><label>Rua<input required autoComplete="address-line1" value={address.street} onChange={(event)=>setAddress((current)=>({...current,street:event.target.value}))} placeholder="Nome da rua"/></label><div className="checkout-row"><label>Número<input required autoComplete="address-line2" value={address.number} onChange={(event)=>setAddress((current)=>({...current,number:event.target.value}))}/></label><label>Bairro<input autoComplete="address-level3" value={address.district} onChange={(event)=>setAddress((current)=>({...current,district:event.target.value}))}/></label></div><label>Cidade<input required autoComplete="address-level2" value={address.city} onChange={(event)=>setAddress((current)=>({...current,city:event.target.value}))}/></label><label>Estado (UF)<input required minLength="2" maxLength="2" autoComplete="address-level1" value={address.state} onChange={(event)=>setAddress((current)=>({...current,state:event.target.value.toUpperCase()}))} placeholder="SP"/></label><div className="cart-total"><span>Total · frete grátis</span><b>{money(total)}</b></div><button className="add-button" disabled={busy||!paymentsEnabled}>{busy?'Preparando pagamento...':'Ir para pagamento seguro'}</button>{!paymentsEnabled&&<small className="checkout-note">Mercado Pago ainda precisa ser configurado no servidor.</small>}</form></>}
       </section>
     </div>}
   </>;
