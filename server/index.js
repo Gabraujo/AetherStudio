@@ -123,6 +123,7 @@ const shippingSchema = z.object({
 const checkoutSchema = z.object({
   items: z.array(z.object({ productId: z.string().uuid(), quantity: z.number().int().min(1).max(10) })).min(1).max(20),
   shippingAddress: shippingSchema,
+  paymentMethod: z.enum(['pix', 'other']).default('other'),
 });
 const imageUpload = multer({
   storage: multer.memoryStorage(),
@@ -390,6 +391,7 @@ app.post('/api/orders', requireUser, async (req, res) => {
       items: created.items,
       buyer: req.user,
       shippingAddress: data.shippingAddress,
+      paymentMethod: data.paymentMethod,
     });
     await pool.query('UPDATE orders SET payment_preference_id = $2, updated_at = NOW() WHERE id = $1', [orderId, preference.id]);
     return res.status(201).json({ orderId, checkoutUrl: preference.url });

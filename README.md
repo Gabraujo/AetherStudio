@@ -51,6 +51,8 @@ O checkout usa Mercado Pago Checkout Pro, com pagamento processado fora do site 
 
 Enquanto esses valores não estiverem definidos, o checkout informa que está indisponível e não cria pedidos falsos. O cliente é redirecionado ao ambiente do Mercado Pago. A loja só marca o pedido pago depois de validar a assinatura do webhook e consultar o pagamento no próprio Mercado Pago. Pedidos reservam o estoque por 30 minutos; uma rotina devolve o estoque quando a reserva expira.
 
+No checkout, o cliente pode iniciar com Pix selecionado ou abrir as outras opções disponíveis. O Mercado Pago continua oferecendo a seleção final no ambiente seguro dele. Para que Pix apareça, habilite-o na conta recebedora e cadastre uma chave Pix; a disponibilidade também depende da conta e das configurações do provedor. A integração Checkout Pro permite configurar meios disponíveis na preferência e usa `pix` como identificador do Pix.
+
 Configure a notificação **payment** no painel Mercado Pago para `https://seudominio.com.br/api/payments/webhook`. Durante o desenvolvimento, use credenciais de teste e uma URL pública de túnel para testar webhooks; troque para as credenciais de produção quando publicar.
 
 ## Deploy em VPS com Coolify

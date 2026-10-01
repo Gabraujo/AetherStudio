@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 
 const API_ROOT = 'https://api.mercadopago.com';
 
-export async function createCheckoutPreference({ order, items, buyer, shippingAddress }) {
+export async function createCheckoutPreference({ order, items, buyer, shippingAddress, paymentMethod }) {
   const accessToken = process.env.MP_ACCESS_TOKEN;
   const appUrl = process.env.APP_URL?.replace(/\/$/, '');
   if (!accessToken || !appUrl) {
@@ -44,6 +44,7 @@ export async function createCheckoutPreference({ order, items, buyer, shippingAd
         unit_price: item.unit_price_cents / 100,
       })),
       payer: { email: buyer.email, name: buyer.name },
+      ...(paymentMethod === 'pix' ? { payment_methods: { default_payment_method_id: 'pix' } } : {}),
       shipments: {
         receiver_address: {
           street_name: shippingAddress.street,
