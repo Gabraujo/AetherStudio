@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Archive, ArrowLeft, ImagePlus, PackageCheck, Pencil, Plus, RotateCcw, Save, ShoppingBag, X } from 'lucide-react';
+import { Archive, ArrowLeft, ImagePlus, PackageCheck, Pencil, Plus, RotateCcw, Save, ShoppingBag, Star, X } from 'lucide-react';
 import { api } from './api.js';
 
 const emptyForm = {
@@ -18,6 +18,7 @@ const orderStatuses = {
 
 export default function AdminPanel({ onClose, onChanged, notify }) {
   const [products, setProducts] = useState([]);
+  const [featuredIds, setFeaturedIds] = useState([]);
   const [orders, setOrders] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
@@ -26,16 +27,57 @@ export default function AdminPanel({ onClose, onChanged, notify }) {
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [ordersLoading, setOrdersLoading] = useState(true);
+  const [featuredSaving, setFeaturedSaving] = useState(false);
 
   async function refresh() {
     setLoading(true);
     try {
-      setProducts(await api('/api/admin/products'));
+      const catalog = await api('/api/admin/products');
+      setProducts(catalog);
+      setFeaturedIds(catalog.filter((product) => product.featuredPosition)
+        .sort((a, b) => a.featuredPosition - b.featuredPosition)
+        .map((product) => product.id));
     } catch (error) {
       notify(error.message, 'error');
     } finally {
       setLoading(false);
     }
+  }
+
+  function toggleFeatured(product) {
+    if (featuredIds.includes(product.id)) {
+      setFeaturedIds(featuredIds.filter((id) => id !== product.id));
+      return;
+    }
+    if (!product.active || !product.imageUrl) {
+      notify('Publique a figure e adicione uma imagem antes de destacá-la.', 'error');
+      return;
+    }
+    if (featuredIds.length >= 4) {
+      notify('Escolha no máximo quatro figures para a página inicial.', 'error');
+      return;
+    }
+    setFeaturedIds([...featuredIds, product.id]);
+  }
+
+  async function saveFeatured() {
+    setFeaturedSaving(true);
+    try {
+      await api('/api/admin/featured', { method: 'PUT', body: { productIds: featuredIds } });
+      notify('Destaques da página inicial salvos.');
+      await refresh();
+      onChanged();
+    } catch (error) {
+      notify(error.message, 'error');
+    } finally {
+      setFeaturedSaving(false);
+    }
+  }
+
+  function resetFeatured() {
+    setFeaturedIds(products.filter((product) => product.featuredPosition)
+      .sort((a, b) => a.featuredPosition - b.featuredPosition)
+      .map((product) => product.id));
   }
 
   async function refreshOrders() {
@@ -53,6 +95,12 @@ export default function AdminPanel({ onClose, onChanged, notify }) {
     refresh();
     refreshOrders();
   }, []);
+
+  const savedFeaturedIds = products.filter((product) => product.featuredPosition)
+    .sort((a, b) => a.featuredPosition - b.featuredPosition)
+    .map((product) => product.id);
+  const featuredChanged = featuredIds.length !== savedFeaturedIds.length
+    || featuredIds.some((id, index) => id !== savedFeaturedIds[index]);
 
   function edit(product) {
     setEditingId(product.id);
@@ -166,14 +214,15 @@ export default function AdminPanel({ onClose, onChanged, notify }) {
     <div className="admin-heading">
       <div>
         <div className="eyebrow">AETHER STUDIO</div>
-        <h1>{section === 'products' ? 'Catálogo' : 'Pedidos'}<span>.</span></h1>
-        <p>{section === 'products' ? 'Adicione peças, ajuste preços e estoque ou remova itens da vitrine.' : 'Acompanhe pagamentos, clientes e endereços de entrega.'}</p>
+        <h1>{section === 'products' ? 'Catálogo' : section === 'orders' ? 'Pedidos' : 'Página inicial'}<span>.</span></h1>
+        <p>{section === 'products' ? 'Adicione peças, ajuste preços e estoque ou remova itens da vitrine.' : section === 'orders' ? 'Acompanhe pagamentos, clientes e endereços de entrega.' : 'Escolha até quatro figures para compor o destaque visual da loja.'}</p>
       </div>
       {section === 'products' && <button className="add-button admin-new" onClick={() => { setEditingId(null); setForm(emptyForm); document.querySelector('.admin-form')?.scrollIntoView({ behavior: 'smooth' }); }}><Plus size={16}/> Nova figure</button>}
     </div>
 
     <nav className="admin-nav" aria-label="Seções administrativas">
       <button className={section === 'products' ? 'active' : ''} onClick={() => setSection('products')}><PackageCheck size={15}/> Catálogo</button>
+      <button className={section === 'featured' ? 'active' : ''} onClick={() => setSection('featured')}><Star size={15}/> Página inicial <span>{featuredIds.length}/4</span></button>
       <button className={section === 'orders' ? 'active' : ''} onClick={() => setSection('orders')}><ShoppingBag size={15}/> Pedidos <span>{orders.length}</span></button>
     </nav>
 
@@ -205,6 +254,28 @@ export default function AdminPanel({ onClose, onChanged, notify }) {
         <div className="admin-product-actions"><button className="icon-button" onClick={() => edit(product)} aria-label={`Editar ${product.name}`}><Pencil size={16}/></button>{product.active ? <button className="icon-button danger" onClick={() => archive(product)} aria-label={`Remover ${product.name}`}><Archive size={16}/></button> : <button className="icon-button" onClick={() => restore(product)} aria-label={`Restaurar ${product.name}`}><RotateCcw size={16}/></button>}</div>
       </article>)}</div>}
     </>}
+
+    {section === 'featured' && <section className="featured-admin">
+      <div className="featured-admin-heading">
+        <div><h2>Figures em destaque</h2><p>Selecione de uma a quatro figures publicadas com imagem. A ordem da seleção define a sequência da esquerda para a direita.</p></div>
+        <span className="featured-count">{featuredIds.length} / 4 selecionadas</span>
+      </div>
+      {loading ? <p className="admin-empty">Carregando catálogo...</p> : products.filter((product) => product.active).length === 0 ? <p className="admin-empty">Publique uma figure para poder destacá-la.</p> : <div className="featured-admin-grid">
+        {products.filter((product) => product.active).map((product) => {
+          const selectedIndex = featuredIds.indexOf(product.id);
+          const selected = selectedIndex >= 0;
+          const unavailable = !product.imageUrl || (!selected && featuredIds.length >= 4);
+          return <label className={`featured-admin-card ${selected ? 'selected' : ''} ${unavailable ? 'unavailable' : ''}`} key={product.id}>
+            <input type="checkbox" checked={selected} disabled={!selected && unavailable} onChange={() => toggleFeatured(product)}/>
+            <div className="featured-admin-thumb">{product.imageUrl ? <img src={product.imageUrl} alt=""/> : <ImagePlus size={20} />}{selected && <span>{String(selectedIndex + 1).padStart(2, '0')}</span>}</div>
+            <b>{product.name}</b>
+            <small>{product.imageUrl ? product.category : 'Adicione uma imagem para destacar'}</small>
+          </label>;
+        })}
+      </div>}
+      <div className="featured-admin-actions"><button className="add-button" disabled={!featuredChanged || featuredSaving || loading} onClick={saveFeatured}>{featuredSaving ? 'Salvando...' : 'Salvar destaques'}</button><button className="secondary" disabled={!featuredChanged || featuredSaving || loading} onClick={resetFeatured}>Descartar alterações</button></div>
+      <p className="featured-admin-hint">Se nenhuma figure estiver selecionada, a página inicial mantém apenas o visual Aether.</p>
+    </section>}
 
     {section === 'orders' && <section className="admin-orders">
       <div className="admin-list-heading"><h2>Pedidos recentes</h2><button className="secondary" onClick={refreshOrders} disabled={ordersLoading}>{ordersLoading ? 'Atualizando...' : 'Atualizar pedidos'}</button></div>

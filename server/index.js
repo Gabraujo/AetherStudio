@@ -112,6 +112,9 @@ const productSchema = z.object({
   message: 'O preço promocional deve ser menor que o preço original.',
   path: ['compareAtCents'],
 });
+const featuredProductsSchema = z.object({
+  productIds: z.array(z.string().uuid()).max(4).refine((ids) => new Set(ids).size === ids.length, 'Não repita figures nos destaques.'),
+});
 const shippingSchema = z.object({
   street: z.string().trim().min(2).max(160),
   number: z.string().trim().min(1).max(20),
@@ -159,6 +162,7 @@ function productDto(row) {
     stock: Number(row.stock),
     imageUrl: row.image_url,
     active: row.active,
+    featuredPosition: row.featured_position === null ? null : Number(row.featured_position),
     createdAt: row.created_at,
   };
 }
@@ -451,6 +455,33 @@ app.get('/api/admin/products', requireUser, requireAdmin, async (_req, res) => {
   res.json(rows.map(productDto));
 });
 
+app.put('/api/admin/featured', requireUser, requireAdmin, async (req, res) => {
+  const { productIds } = parse(featuredProductsSchema, req.body);
+  await inTransaction(async (client) => {
+    await client.query('SELECT pg_advisory_xact_lock(731904251)');
+    const { rows } = await client.query(
+      'SELECT id, active, image_url FROM products WHERE id = ANY($1::uuid[]) FOR UPDATE',
+      [productIds],
+    );
+    if (rows.length !== productIds.length) {
+      const error = new Error('Uma das figures selecionadas não foi encontrada. Atualize o catálogo.');
+      error.status = 409;
+      throw error;
+    }
+    if (rows.some((product) => !product.active || !product.image_url)) {
+      const error = new Error('Destaque apenas figures publicadas que tenham uma imagem.');
+      error.status = 400;
+      throw error;
+    }
+
+    await client.query('UPDATE products SET featured_position=NULL WHERE featured_position IS NOT NULL');
+    for (const [index, productId] of productIds.entries()) {
+      await client.query('UPDATE products SET featured_position=$2, updated_at=NOW() WHERE id=$1', [productId, index + 1]);
+    }
+  });
+  res.json({ productIds });
+});
+
 app.post('/api/admin/products', requireUser, requireAdmin, async (req, res) => {
   const data = parse(productSchema, req.body);
   if (data.imageUrl && !/^https:\/\//i.test(data.imageUrl) && !/^\/uploads\/[\w-]+\.(jpg|png|webp)$/i.test(data.imageUrl)) {
@@ -472,7 +503,9 @@ app.put('/api/admin/products/:id', requireUser, requireAdmin, async (req, res) =
   }
   const { rows } = await pool.query(
     `UPDATE products SET name=$2, category=$3, description=$4, price_cents=$5,
-       compare_at_cents=$6, stock=$7, image_url=$8, active=$9, updated_at=NOW()
+       compare_at_cents=$6, stock=$7, image_url=$8, active=$9,
+       featured_position=CASE WHEN $9=TRUE AND $8 IS NOT NULL THEN featured_position ELSE NULL END,
+       updated_at=NOW()
      WHERE id=$1 RETURNING *`,
     [req.params.id, data.name, data.category, data.description, data.priceCents, data.compareAtCents, data.stock, data.imageUrl, data.active],
   );
@@ -481,7 +514,7 @@ app.put('/api/admin/products/:id', requireUser, requireAdmin, async (req, res) =
 });
 
 app.delete('/api/admin/products/:id', requireUser, requireAdmin, async (req, res) => {
-  const { rowCount } = await pool.query('UPDATE products SET active=FALSE, updated_at=NOW() WHERE id=$1 AND active=TRUE', [req.params.id]);
+  const { rowCount } = await pool.query('UPDATE products SET active=FALSE, featured_position=NULL, updated_at=NOW() WHERE id=$1 AND active=TRUE', [req.params.id]);
   if (!rowCount) return res.status(404).json({ error: 'Figure não encontrada no catálogo.' });
   res.sendStatus(204);
 });

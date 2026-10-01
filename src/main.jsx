@@ -51,6 +51,41 @@ function readCart(key) {
   }
 }
 
+function heroSliceLayout(index, count) {
+  if (count <= 1) return { left: '0%', width: '100%', clipPath: 'inset(0)' };
+  const step = 100 / count;
+  const boundary = (position) => {
+    const offset = position % 2 === 1 ? -3.5 : 3.5;
+    return { top: step * position + offset, bottom: step * position - offset };
+  };
+  const start = index === 0 ? { top: 0, bottom: 0 } : boundary(index);
+  const end = index === count - 1 ? { top: 100, bottom: 100 } : boundary(index + 1);
+  const left = Math.min(start.top, start.bottom);
+  const right = Math.max(end.top, end.bottom);
+  const width = right - left;
+  const point = (value) => `${((value - left) / width) * 100}%`;
+  return {
+    left: `${left}%`,
+    width: `${width}%`,
+    clipPath: `polygon(${point(start.top)} 0, ${point(end.top)} 0, ${point(end.bottom)} 100%, ${point(start.bottom)} 100%)`,
+  };
+}
+
+function heroDividerLayout(position, count) {
+  const step = 100 / count;
+  const offset = position % 2 === 1 ? -3.5 : 3.5;
+  const top = step * position + offset;
+  const bottom = step * position - offset;
+  const thickness = 0.45;
+  const left = Math.min(top, bottom) - thickness / 2;
+  const width = Math.abs(bottom - top) + thickness;
+  return {
+    clipPath: `polygon(${((top - left) / width) * 100}% 0, ${((top + thickness / 2 - left) / width) * 100}% 0, ${((bottom + thickness / 2 - left) / width) * 100}% 100%, ${((bottom - thickness / 2 - left) / width) * 100}% 100%)`,
+    left: `${left}%`,
+    width: `${width}%`,
+  };
+}
+
 function App() {
   const [products, setProducts] = useState([]);
   const [user, setUser] = useState(null);
@@ -83,6 +118,9 @@ function App() {
       || (filter === 'Promoções' ? product.compareAtCents && product.compareAtCents > product.priceCents : product.category === filter);
     return selected && `${product.name} ${product.category}`.toLowerCase().includes(query.toLowerCase());
   }), [products, filter, query]);
+  const featuredProducts = useMemo(() => products
+    .filter((product) => product.featuredPosition && product.imageUrl)
+    .sort((a, b) => a.featuredPosition - b.featuredPosition), [products]);
 
   function notify(message, kind = 'success', action = null) {
     setNotice({ message, kind, action });
@@ -318,7 +356,13 @@ function App() {
     {notice&&<div className={`notice ${notice.kind}`} role={notice.kind==='error'?'alert':'status'} aria-live={notice.kind==='error'?'assertive':'polite'}><span className="notice-message">{notice.message}</span>{notice.action&&<div className="notice-actions"><button type="button" className="notice-cancel" onClick={dismissNotice}>Cancelar</button><button type="button" className="notice-confirm" onClick={confirmNoticeAction}>{notice.action.label}</button></div>}<button type="button" className="notice-close" onClick={dismissNotice} aria-label="Fechar aviso"><X size={15}/></button></div>}
 
     {modal==='admin' ? <AdminPanel onClose={()=>setModal('')} onChanged={refreshProducts} notify={notify}/> : <main id="top">
-      <section className="hero"><div className="hero-inner"><div className="hero-logo" aria-label="Aether Studio"><span>Aether</span><i/><small>STUDIO</small></div><p>Action figures colecionáveis com<br className="desktop-break"/> acabamento de galeria, para quem coleciona<br className="desktop-break"/> pelos detalhes.</p><a className="outline-button" href="#catalogo">Ver figures</a></div></section>
+      <section className={`hero ${featuredProducts.length ? 'hero-with-featured' : ''}`}>
+        {featuredProducts.length > 0 && <div className="hero-featured-background" aria-hidden="true">
+          {featuredProducts.map((product, index) => <div className="hero-slice" key={product.id} style={heroSliceLayout(index, featuredProducts.length)}><img src={product.imageUrl} alt=""/></div>)}
+          {featuredProducts.slice(0, -1).map((product, index) => <span className="hero-divider" key={`divider-${product.id}`} style={heroDividerLayout(index + 1, featuredProducts.length)}/>)}
+        </div>}
+        <div className="hero-inner"><div className="hero-logo" aria-label="Aether Studio"><span>Aether</span><i/><small>STUDIO</small></div><p>Action figures colecionáveis com<br className="desktop-break"/> acabamento de galeria, para quem coleciona<br className="desktop-break"/> pelos detalhes.</p><a className="outline-button" href="#catalogo">Ver figures</a></div>
+      </section>
 
       <section className="catalog" id="catalogo"><div className="catalog-heading"><h1>Catálogo de Figures</h1><p>Todos com frete grátis para o Brasil</p></div>
         <div className="category-list">{categories.map((category)=><button key={category} className={filter===category?'active':''} onClick={()=>setFilter(category)}>{category}</button>)}</div>
