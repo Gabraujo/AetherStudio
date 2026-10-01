@@ -6,7 +6,7 @@ export async function createCheckoutPreference({ order, items, buyer, shippingAd
   const accessToken = process.env.MP_ACCESS_TOKEN;
   const appUrl = process.env.APP_URL?.replace(/\/$/, '');
   if (!accessToken || !appUrl) {
-    const error = new Error('Checkout indisponível: configure Mercado Pago e domínio público no servidor.');
+    const error = new Error('A finalização online está temporariamente indisponível. Tente novamente mais tarde.');
     error.status = 503;
     throw error;
   }

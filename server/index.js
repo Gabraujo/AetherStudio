@@ -319,7 +319,7 @@ async function expireReservations() {
 
 app.post('/api/orders', requireUser, async (req, res) => {
   if (!process.env.MP_ACCESS_TOKEN || !process.env.MP_WEBHOOK_SECRET || !process.env.APP_URL) {
-    return res.status(503).json({ error: 'Checkout ainda não está configurado. Cadastre as credenciais de pagamento e o domínio público no servidor.' });
+    return res.status(503).json({ error: 'A finalização online está temporariamente indisponível. Tente novamente mais tarde.' });
   }
   const data = parse(checkoutSchema, req.body);
   const quantities = new Map();
