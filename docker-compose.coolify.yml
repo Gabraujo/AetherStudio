@@ -1,0 +1,61 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-aether}
+      POSTGRES_USER: ${POSTGRES_USER:-aether}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set_POSTGRES_PASSWORD_in_Coolify}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aether} -d ${POSTGRES_DB:-aether}"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    security_opt:
+      - no-new-privileges:true
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      APP_URL: ${APP_URL:?Set_APP_URL_in_Coolify}
+      SESSION_SECRET: ${SESSION_SECRET:?Set_SESSION_SECRET_in_Coolify}
+      SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-aether.sid}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-aetherstudio.figures@gmail.com}
+      ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
+      POSTGRES_DB: ${POSTGRES_DB:-aether}
+      POSTGRES_USER: ${POSTGRES_USER:-aether}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set_POSTGRES_PASSWORD_in_Coolify}
+      DATABASE_URL: postgres://${POSTGRES_USER:-aether}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-aether}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
+      DB_POOL_MAX: ${DB_POOL_MAX:-10}
+      MP_ACCESS_TOKEN: ${MP_ACCESS_TOKEN:-}
+      MP_WEBHOOK_SECRET: ${MP_WEBHOOK_SECRET:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - product_uploads:/app/uploads
+    read_only: true
+    tmpfs:
+      - /tmp
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  postgres_data:
+  product_uploads:
