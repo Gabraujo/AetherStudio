@@ -68,7 +68,7 @@ Esta opção usa o proxy HTTPS do Coolify. Use `docker-compose.coolify.yml`; ele
 7. Depois do primeiro acesso administrativo, remova `ADMIN_BOOTSTRAP_PASSWORD` das variáveis do Coolify e reinicie/reimplante a aplicação. Cadastre suas figures reais no painel. Os exemplos iniciais são rascunhos sem estoque.
 8. Quando a URL HTTPS estiver ativa, configure o webhook **Pagamentos** no Mercado Pago para `https://seudominio.com.br/api/payments/webhook`, salve o segredo em `MP_WEBHOOK_SECRET` e informe o Access Token em `MP_ACCESS_TOKEN`. Teste com credenciais e conta compradora de teste antes de trocar para produção.
 
-O acesso direto ao painel Coolify pela porta 8000 pode ser fechado depois que um domínio seguro para o painel estiver configurado. Consulte as [regras de firewall do Coolify](https://coolify.io/docs/core/infrastructure/servers/firewall). Faça backups periódicos e externos do PostgreSQL e das imagens; veja `deploy/backup.sh` abaixo.
+O acesso direto ao painel Coolify pela porta 8000 pode ser fechado depois que um domínio seguro para o painel estiver configurado. Consulte as [regras de firewall do Coolify](https://coolify.io/docs/core/infrastructure/servers/firewall). Para este fluxo, configure os agendamentos nativos do Coolify para o banco e para o volume `product_uploads`, com destino fora da VPS e restauração testada. O script `deploy/backup.sh` abaixo usa `docker compose exec` e serve para o deploy direto, não para o Compose gerenciado pelo Coolify.
 
 ## Produção em VPS com domínio (Docker Compose e Caddy)
 
@@ -86,7 +86,23 @@ Caddy encaminha HTTPS e solicita/renova certificados automaticamente quando o DN
 
 ### Backups do banco e das imagens
 
-Na VPS, dentro da pasta do projeto, execute `sh deploy/backup.sh`. O script cria um dump PostgreSQL e um arquivo separado com as imagens enviadas, em `./backups`, com permissões restritas. Esses arquivos contêm dados pessoais de clientes: criptografe-os antes de copiá-los para armazenamento externo e mantenha cópias fora da VPS. Programe a execução periódica e teste a restauração em um ambiente separado.
+No deploy direto com Docker Compose, execute `sh deploy/backup.sh` na pasta do projeto. O script cria dump do PostgreSQL e arquivo das imagens, calcula checksums, impede backups simultâneos e remove arquivos locais mais antigos que `BACKUP_RETENTION_DAYS` (30 dias por padrão). Para enviar uma cópia externa, configure previamente o `rclone` e defina `RCLONE_REMOTE`, por exemplo `s3:aether-backups/producao`. Para cifrar os arquivos antes de salvá-los ou enviá-los, instale `age` e defina `AGE_RECIPIENT` com a chave pública; guarde a chave privada fora da VPS. Exemplo de execução:
+
+```sh
+BACKUP_DIR=/var/backups/aether \
+BACKUP_RETENTION_DAYS=30 \
+AGE_RECIPIENT='age1...' \
+RCLONE_REMOTE='s3:aether-backups/producao' \
+sh deploy/backup.sh
+```
+
+Agende a execução diária no cron do host e direcione a saída para um log protegido. Configure o rclone e as credenciais no usuário de sistema que executará o cron; use um caminho remoto dedicado a esta loja. O script exige `AGE_RECIPIENT` sempre que `RCLONE_REMOTE` estiver definido, para não enviar dados de clientes sem cifra. Sem `AGE_RECIPIENT`, os arquivos locais não são cifrados. Após configurar, verifique a cópia remota e teste a restauração em uma instância separada. Para deploy direto ou Coolify, mantenha o roteiro em [`deploy/PRODUCTION_CHECKLIST.md`](deploy/PRODUCTION_CHECKLIST.md).
+
+Exemplo de entrada no `crontab -e` do usuário que administra o Compose (ajuste os caminhos e valores):
+
+```cron
+0 3 * * * cd /opt/aether && BACKUP_DIR=/var/backups/aether BACKUP_RETENTION_DAYS=30 AGE_RECIPIENT='age1...' RCLONE_REMOTE='s3:aether-backups/producao' /bin/sh deploy/backup.sh >> /var/log/aether-backup.log 2>&1
+```
 
 ## Verificação e operação
 
