@@ -118,16 +118,20 @@ export default function AdminPanel({ onClose, onChanged, notify }) {
     }
   }
 
-  async function archive(product) {
-    if (!window.confirm(`Remover “${product.name}” do catálogo?`)) return;
-    try {
-      await api(`/api/admin/products/${product.id}`, { method: 'DELETE' });
-      notify('Figure removida do catálogo. O histórico de pedidos foi preservado.');
-      await refresh();
-      onChanged();
-    } catch (error) {
-      notify(error.message, 'error');
-    }
+  function archive(product) {
+    notify(`Remover “${product.name}” do catálogo?`, 'confirm', {
+      label: 'Remover',
+      onConfirm: async () => {
+        try {
+          await api(`/api/admin/products/${product.id}`, { method: 'DELETE' });
+          notify('Figure removida do catálogo. O histórico de pedidos foi preservado.');
+          await refresh();
+          onChanged();
+        } catch (error) {
+          notify(error.message, 'error');
+        }
+      },
+    });
   }
 
   async function restore(product) {

@@ -84,10 +84,22 @@ function App() {
     return selected && `${product.name} ${product.category}`.toLowerCase().includes(query.toLowerCase());
   }), [products, filter, query]);
 
-  function notify(message, kind = 'success') {
-    setNotice({ message, kind });
+  function notify(message, kind = 'success', action = null) {
+    setNotice({ message, kind, action });
     window.clearTimeout(notify.timer);
-    notify.timer = window.setTimeout(() => setNotice(null), 5500);
+    if (!action) notify.timer = window.setTimeout(() => setNotice(null), 5500);
+  }
+
+  function dismissNotice() {
+    window.clearTimeout(notify.timer);
+    setNotice(null);
+  }
+
+  async function confirmNoticeAction() {
+    const action = notice?.action;
+    if (!action) return;
+    dismissNotice();
+    await action.onConfirm();
   }
 
   async function refreshProducts() {
@@ -303,7 +315,7 @@ function App() {
       </div>
     </header>
 
-    {notice&&<div className={`notice ${notice.kind}`} role="status"><span>{notice.message}</span><button onClick={()=>setNotice(null)} aria-label="Fechar aviso"><X size={15}/></button></div>}
+    {notice&&<div className={`notice ${notice.kind}`} role={notice.kind==='error'?'alert':'status'} aria-live={notice.kind==='error'?'assertive':'polite'}><span className="notice-message">{notice.message}</span>{notice.action&&<div className="notice-actions"><button type="button" className="notice-cancel" onClick={dismissNotice}>Cancelar</button><button type="button" className="notice-confirm" onClick={confirmNoticeAction}>{notice.action.label}</button></div>}<button type="button" className="notice-close" onClick={dismissNotice} aria-label="Fechar aviso"><X size={15}/></button></div>}
 
     {modal==='admin' ? <AdminPanel onClose={()=>setModal('')} onChanged={refreshProducts} notify={notify}/> : <main id="top">
       <section className="hero"><div className="hero-inner"><div className="hero-logo" aria-label="Aether Studio"><span>Aether</span><i/><small>STUDIO</small></div><p>Action figures colecionáveis com<br className="desktop-break"/> acabamento de galeria, para quem coleciona<br className="desktop-break"/> pelos detalhes.</p><a className="outline-button" href="#catalogo">Ver figures</a></div></section>
