@@ -5,8 +5,18 @@ import pg from 'pg';
 
 const { Pool } = pg;
 
+const databaseConfig = process.env.POSTGRES_HOST
+  ? {
+      host: process.env.POSTGRES_HOST,
+      port: Number(process.env.POSTGRES_PORT || 5432),
+      database: process.env.POSTGRES_DB,
+      user: process.env.POSTGRES_USER,
+      password: process.env.POSTGRES_PASSWORD,
+    }
+  : { connectionString: process.env.DATABASE_URL };
+
 export const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  ...databaseConfig,
   max: Number(process.env.DB_POOL_MAX || 10),
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 5_000,
