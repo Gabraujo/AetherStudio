@@ -91,9 +91,12 @@ export async function createCheckoutPreference({ order, items, buyer, shippingAd
   } catch {
     throw new Error('Mercado Pago returned an invalid checkout URL.');
   }
-  const allowedCheckoutHosts = new Set(['www.mercadopago.com.br', 'sandbox.mercadopago.com.br']);
+  const isMercadoPagoHost = checkoutUrl.hostname === 'mercadopago.com'
+    || checkoutUrl.hostname.endsWith('.mercadopago.com')
+    || checkoutUrl.hostname === 'mercadopago.com.br'
+    || checkoutUrl.hostname.endsWith('.mercadopago.com.br');
   if (checkoutUrl.protocol !== 'https:' || checkoutUrl.username || checkoutUrl.password || checkoutUrl.port
-    || !allowedCheckoutHosts.has(checkoutUrl.hostname)) {
+    || !isMercadoPagoHost) {
     throw new Error('Mercado Pago returned an untrusted checkout URL.');
   }
   return { id: result.id, url: checkoutUrl.href };
