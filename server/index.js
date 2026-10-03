@@ -593,6 +593,10 @@ app.post('/api/payments/webhook', async (req, res) => {
     });
     res.sendStatus(200);
   } catch (error) {
+    if (error.status === 404) {
+      console.warn(`[aether] Mercado Pago payment ${dataId} was not found; acknowledging webhook without changing the order.`);
+      return res.sendStatus(200);
+    }
     console.error('[aether] Webhook processing failed:', error.message);
     res.sendStatus(500);
   }

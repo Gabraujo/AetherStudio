@@ -132,6 +132,10 @@ export async function getPayment(paymentId) {
     headers: { Authorization: `Bearer ${process.env.MP_ACCESS_TOKEN}` },
     signal: AbortSignal.timeout(10_000),
   });
-  if (!response.ok) throw new Error(`Mercado Pago payment lookup failed (${response.status}).`);
+  if (!response.ok) {
+    const error = new Error(`Mercado Pago payment lookup failed (${response.status}).`);
+    error.status = response.status;
+    throw error;
+  }
   return response.json();
 }
