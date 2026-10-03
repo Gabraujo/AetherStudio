@@ -8,6 +8,8 @@
 - [ ] No firewall da VPS, deixar públicos somente SSH (idealmente restrito ao seu IP), HTTP e HTTPS. Não publicar PostgreSQL nem o painel Coolify.
 - [ ] Configurar Cloudflare com HTTPS válido e SSL/TLS em Full (strict) antes de ativar o proxy laranja.
 - [ ] Atualizar Ubuntu, Docker e Coolify antes do lançamento e manter uma rotina de atualização.
+- [ ] Em produção, usar `APP_URL` HTTPS, `SESSION_SECRET` aleatório com pelo menos 64 bytes e `MP_EXPECT_LIVE=true`.
+- [ ] Confirmar que `ADMIN_BOOTSTRAP_PASSWORD` foi removida do ambiente depois da criação da conta administradora.
 
 ## Dados e recuperação
 
@@ -23,6 +25,7 @@
 - [ ] Fazer um pedido de teste como cliente e conferir conta, endereço, estoque, histórico e painel administrativo.
 - [ ] Configurar o webhook do Mercado Pago na URL HTTPS pública e validar assinatura e atualização do pedido com credenciais de teste.
 - [ ] Testar pagamento aprovado, recusado/cancelado e aprovado após a reserva expirar; conferir a reposição do estoque em cada caso.
+- [ ] Confirmar que a loja de teste usa credenciais de teste e `MP_EXPECT_LIVE=false`, em ambiente separado da loja real.
 - [ ] Só depois dos testes, trocar pelas credenciais de produção e confirmar que o Pix está habilitado na conta recebedora.
 - [ ] Definir e publicar canais de atendimento, políticas de entrega, cancelamento e devolução antes de divulgar a loja.
 

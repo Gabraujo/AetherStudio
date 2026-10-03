@@ -37,6 +37,7 @@ services:
       DB_POOL_MAX: ${DB_POOL_MAX:-10}
       MP_ACCESS_TOKEN: ${MP_ACCESS_TOKEN:-}
       MP_WEBHOOK_SECRET: ${MP_WEBHOOK_SECRET:-}
+      MP_EXPECT_LIVE: ${MP_EXPECT_LIVE:-true}
     depends_on:
       db:
         condition: service_healthy

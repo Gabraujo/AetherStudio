@@ -55,6 +55,8 @@ No checkout, o cliente pode iniciar com Pix selecionado ou abrir as outras opç�
 
 Configure a notificação **payment** no painel Mercado Pago para `https://seudominio.com.br/api/payments/webhook`. Durante o desenvolvimento, use credenciais de teste e uma URL pública de túnel para testar webhooks; troque para as credenciais de produção quando publicar.
 
+No Compose do Coolify, `MP_EXPECT_LIVE` assume `true`; assim, o servidor ignora pagamentos de teste em produção. Para um ambiente separado de homologação com credenciais de teste, defina `MP_EXPECT_LIVE=false`. Nunca use essa opção na loja que recebe pedidos reais. Em produção, `SESSION_SECRET` deve ter pelo menos 64 bytes; `openssl rand -hex 48` gera um valor adequado. Um erro ao criar checkout deixa a reserva de estoque expirar naturalmente em 30 minutos para evitar liberar itens se o provedor tiver aceitado a solicitação apesar de um timeout.
+
 ## Deploy em VPS com Coolify
 
 Esta opção usa o proxy HTTPS do Coolify. Use `docker-compose.coolify.yml`; ele publica a aplicação na rede interna do Docker e mantém PostgreSQL e imagens em volumes persistentes. Não use `docker-compose.yml` neste fluxo, pois esse arquivo inclui um Caddy próprio que ocupa as portas 80 e 443 do servidor.

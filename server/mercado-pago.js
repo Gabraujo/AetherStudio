@@ -4,7 +4,18 @@ const API_ROOT = 'https://api.mercadopago.com';
 
 export async function createCheckoutPreference({ order, items, buyer, shippingAddress, paymentMethod }) {
   const accessToken = process.env.MP_ACCESS_TOKEN;
-  const appUrl = process.env.APP_URL?.replace(/\/$/, '');
+  let appUrl;
+  try {
+    const configuredUrl = new URL(process.env.APP_URL || '');
+    if (configuredUrl.username || configuredUrl.password || configuredUrl.pathname !== '/' || configuredUrl.search || configuredUrl.hash) {
+      throw new Error('APP_URL must contain only the public origin.');
+    }
+    appUrl = configuredUrl.origin;
+  } catch {
+    const error = new Error('APP_URL precisa ser uma URL pública válida.');
+    error.status = 503;
+    throw error;
+  }
   if (!accessToken || !appUrl) {
     const error = new Error('A finalização online está temporariamente indisponível. Tente novamente mais tarde.');
     error.status = 503;
@@ -74,22 +85,38 @@ export async function createCheckoutPreference({ order, items, buyer, shippingAd
     error.status = 502;
     throw error;
   }
-  return { id: result.id, url: result.init_point };
+  let checkoutUrl;
+  try {
+    checkoutUrl = new URL(result.init_point);
+  } catch {
+    throw new Error('Mercado Pago returned an invalid checkout URL.');
+  }
+  const allowedCheckoutHosts = new Set(['www.mercadopago.com.br', 'sandbox.mercadopago.com.br']);
+  if (checkoutUrl.protocol !== 'https:' || checkoutUrl.username || checkoutUrl.password || checkoutUrl.port
+    || !allowedCheckoutHosts.has(checkoutUrl.hostname)) {
+    throw new Error('Mercado Pago returned an untrusted checkout URL.');
+  }
+  return { id: result.id, url: checkoutUrl.href };
 }
 
 export function verifyWebhookSignature({ signature, requestId, dataId, secret }) {
   if (!signature || !requestId || !dataId || !secret) return false;
-  const parts = Object.fromEntries(signature.split(',').map((part) => part.trim().split('=')));
-  if (!parts.ts || !parts.v1) return false;
-
-  const manifest = `id:${dataId.toLowerCase()};request-id:${requestId};ts:${parts.ts};`;
-  const expected = createHmac('sha256', secret).update(manifest).digest();
-  let received;
-  try {
-    received = Buffer.from(parts.v1, 'hex');
-  } catch {
-    return false;
+  const parts = new Map();
+  for (const entry of signature.split(',')) {
+    const separator = entry.indexOf('=');
+    if (separator < 1) return false;
+    const key = entry.slice(0, separator).trim().toLowerCase();
+    const value = entry.slice(separator + 1).trim();
+    if ((key === 'ts' || key === 'v1') && parts.has(key)) return false;
+    if (key === 'ts' || key === 'v1') parts.set(key, value);
   }
+  const timestamp = parts.get('ts');
+  const signatureHex = parts.get('v1');
+  if (!/^\d{1,16}$/.test(timestamp || '') || !/^[a-f\d]{64}$/i.test(signatureHex || '')) return false;
+
+  const manifest = `id:${dataId.toLowerCase()};request-id:${requestId};ts:${timestamp};`;
+  const expected = createHmac('sha256', secret).update(manifest).digest();
+  const received = Buffer.from(signatureHex, 'hex');
   return received.length === expected.length && timingSafeEqual(received, expected);
 }
 

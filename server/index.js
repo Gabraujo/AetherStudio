@@ -25,8 +25,29 @@ const sessionSecret = process.env.SESSION_SECRET || '';
 const sessionCookie = process.env.SESSION_COOKIE_NAME || 'aether.sid';
 const isProduction = process.env.NODE_ENV === 'production';
 
-if (sessionSecret.length < 32) {
-  throw new Error('SESSION_SECRET precisa ter pelo menos 32 caracteres.');
+if (Buffer.byteLength(sessionSecret, 'utf8') < (isProduction ? 64 : 32)) {
+  throw new Error(`SESSION_SECRET precisa ter pelo menos ${isProduction ? 64 : 32} bytes${isProduction ? ' em produção' : ''}.`);
+}
+if (!/^[A-Za-z0-9_-]{1,64}$/.test(sessionCookie)) {
+  throw new Error('SESSION_COOKIE_NAME contém caracteres inválidos.');
+}
+if (process.env.MP_EXPECT_LIVE !== undefined && !['true', 'false'].includes(process.env.MP_EXPECT_LIVE)) {
+  throw new Error('MP_EXPECT_LIVE deve ser exatamente true ou false.');
+}
+if (isProduction) {
+  let publicUrl;
+  try {
+    publicUrl = new URL(process.env.APP_URL || '');
+  } catch {
+    throw new Error('APP_URL precisa ser a URL pública HTTPS da loja.');
+  }
+  if (publicUrl.protocol !== 'https:' || publicUrl.port || publicUrl.username || publicUrl.password
+    || publicUrl.pathname !== '/' || publicUrl.search || publicUrl.hash) {
+    throw new Error('APP_URL em produção deve ser uma origem HTTPS pública sem porta, por exemplo https://loja.example.');
+  }
+  if (!process.env.ADMIN_EMAIL || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(process.env.ADMIN_EMAIL.trim())) {
+    throw new Error('Configure um ADMIN_EMAIL válido antes de iniciar em produção.');
+  }
 }
 
 app.disable('x-powered-by');
@@ -89,6 +110,8 @@ app.use('/api', (_req, res, next) => {
 app.use('/api', loadSessionUser);
 
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 12, standardHeaders: true, legacyHeaders: false });
+const checkoutLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 8, standardHeaders: true, legacyHeaders: false });
+const dummyPasswordHash = await bcrypt.hash(randomUUID(), 12);
 const emailSchema = z.string().trim().email().max(254).transform(normalizeEmail);
 const passwordSchema = z.string().min(10).max(72).refine((password) => Buffer.byteLength(password, 'utf8') <= 72, {
   message: 'A senha pode ter no máximo 72 bytes em UTF-8.',
@@ -250,7 +273,8 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
   const data = parse(loginSchema, req.body);
   const { rows } = await pool.query('SELECT * FROM users WHERE email = $1', [data.email]);
   const user = rows[0];
-  if (!user || !(await bcrypt.compare(data.password, user.password_hash))) {
+  const passwordMatches = await bcrypt.compare(data.password, user?.password_hash || dummyPasswordHash);
+  if (!user || !passwordMatches) {
     return res.status(401).json({ error: 'E-mail ou senha incorretos.' });
   }
 
@@ -321,7 +345,7 @@ async function expireReservations() {
   for (const order of rows) await releaseReservation(order.id, 'expired');
 }
 
-app.post('/api/orders', requireUser, async (req, res) => {
+app.post('/api/orders', requireUser, checkoutLimiter, async (req, res) => {
   if (!process.env.MP_ACCESS_TOKEN || !process.env.MP_WEBHOOK_SECRET || !process.env.APP_URL) {
     return res.status(503).json({ error: 'A finalização online está temporariamente indisponível. Tente novamente mais tarde.' });
   }
@@ -400,18 +424,16 @@ app.post('/api/orders', requireUser, async (req, res) => {
     await pool.query('UPDATE orders SET payment_preference_id = $2, updated_at = NOW() WHERE id = $1', [orderId, preference.id]);
     return res.status(201).json({ orderId, checkoutUrl: preference.url });
   } catch (error) {
-    try {
-      await releaseReservation(orderId, 'checkout_error');
-    } catch (releaseError) {
-      console.error(`[aether] Could not release stock for failed checkout ${orderId}:`, releaseError.message);
-    }
+    // A timeout or network error can happen after Mercado Pago accepted the
+    // preference. Keep the stock reserved until expiry to avoid overselling.
     console.error(`[aether] Checkout preference could not be confirmed for order ${orderId}.`);
     throw error;
   }
 });
 
 app.post('/api/payments/webhook', async (req, res) => {
-  const dataId = String(req.query['data.id'] || req.body?.data?.id || '');
+  const dataId = String(req.query['data.id'] || '');
+  if (!/^\d{1,30}$/.test(dataId)) return res.sendStatus(401);
   const isValid = verifyWebhookSignature({
     signature: req.get('x-signature'),
     requestId: req.get('x-request-id'),
@@ -423,20 +445,26 @@ app.post('/api/payments/webhook', async (req, res) => {
   try {
     const payment = await getPayment(dataId);
     if (payment.status !== 'approved') return res.sendStatus(200);
-    const orderId = payment.external_reference || payment.metadata?.order_id;
-    if (!orderId || !Number.isFinite(Number(payment.transaction_amount))) return res.sendStatus(200);
+    const orderId = payment.external_reference;
+    const expectedLiveMode = process.env.MP_EXPECT_LIVE === undefined
+      ? isProduction
+      : process.env.MP_EXPECT_LIVE === 'true';
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId || '')
+      || String(payment.id) !== dataId
+      || payment.live_mode !== expectedLiveMode
+      || !Number.isFinite(Number(payment.transaction_amount))
+      || payment.currency_id !== 'BRL') return res.sendStatus(200);
 
     await inTransaction(async (client) => {
       const { rows } = await client.query('SELECT * FROM orders WHERE id = $1 FOR UPDATE', [orderId]);
       const order = rows[0];
-      if (!order || Number(order.total_cents) !== Math.round(Number(payment.transaction_amount) * 100)
-        || payment.currency_id !== 'BRL') return;
+      if (!order || Number(order.total_cents) !== Math.round(Number(payment.transaction_amount) * 100)) return;
       if (order.status === 'pending_payment') {
         await client.query(
           `UPDATE orders SET status = 'paid', payment_id = $2, updated_at = NOW() WHERE id = $1`,
           [orderId, String(payment.id)],
         );
-      } else if (order.status === 'expired') {
+      } else if (order.status === 'expired' || order.status === 'checkout_error') {
         await client.query(
           `UPDATE orders SET status = 'paid_after_expiry', payment_id = $2, updated_at = NOW() WHERE id = $1`,
           [orderId, String(payment.id)],
