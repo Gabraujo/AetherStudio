@@ -26,7 +26,7 @@ services:
       PORT: 3000
       APP_URL: ${APP_URL:?Set_APP_URL_in_Coolify}
       SESSION_SECRET: ${SESSION_SECRET:?Set_SESSION_SECRET_in_Coolify}
-      SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-aether.sid}
+      SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-aether_sid}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-aetherstudio.figures@gmail.com}
       ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
       POSTGRES_HOST: db

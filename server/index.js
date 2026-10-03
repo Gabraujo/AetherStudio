@@ -23,7 +23,7 @@ const distDir = path.join(rootDir, 'dist');
 const uploadsDir = path.join(rootDir, 'uploads');
 const port = Number(process.env.PORT || 3000);
 const sessionSecret = process.env.SESSION_SECRET || '';
-const sessionCookie = process.env.SESSION_COOKIE_NAME || 'aether.sid';
+const sessionCookie = process.env.SESSION_COOKIE_NAME || 'aether_sid';
 const isProduction = process.env.NODE_ENV === 'production';
 
 if (Buffer.byteLength(sessionSecret, 'utf8') < (isProduction ? 64 : 32)) {
