@@ -356,7 +356,7 @@ function App() {
     <header>
       <a href="#top" className="header-brand">AETHER</a>
       <div className="header-actions">
-        <label className="search"><Search size={16}/><input value={query} onChange={(event) => { setQuery(event.target.value); document.querySelector('#catalogo')?.scrollIntoView({ behavior: 'smooth' }); }} placeholder="Buscar figure" aria-label="Buscar figure"/></label>
+        <label className="search"><Search size={16}/><input id="catalog-search" name="q" type="search" value={query} onChange={(event) => { setQuery(event.target.value); document.querySelector('#catalogo')?.scrollIntoView({ behavior: 'smooth' }); }} placeholder="Buscar figure" aria-label="Buscar figure"/></label>
         <button className="account-button" onClick={() => user ? openAccount() : openLogin()}><UserRound size={17}/><span>{user ? 'Minha conta' : 'Entrar'}</span></button>
         <button className="cart-button" onClick={() => setModal('cart')}><ShoppingBag size={17}/> Carrinho ({count})</button>
       </div>
@@ -385,7 +385,7 @@ function App() {
 
       <section className="about"><div className="about-inner"><h2>Para quem leva a coleção a sério</h2><p>A Aether Studio reúne action figures e estátuas colecionáveis de anime, games, filmes e quadrinhos. Cada figure é escolhida pelo acabamento, pela pintura e pela fidelidade ao personagem, e chega em embalagem reforçada para proteger a sua coleção.</p><div className="perks"><div><b>Frete grátis</b><span>Em todos os figures, para todo o Brasil.</span></div><div><b>Faça sua encomenda</b><span>Não achou o personagem? Encomende e a gente procura para você.</span></div></div></div></section>
 
-      <section className="newsletter"><h2>Receba os lançamentos<br/> primeiro</h2><p>{newsletterDone?'Cadastro realizado. Você receberá novidades da Aether.':'Cadastre seu e-mail e receba os próximos lançamentos em primeira mão.'}</p><form onSubmit={subscribe}><input aria-label="Seu melhor e-mail" required type="email" placeholder="Seu melhor e-mail" value={newsletterEmail} onChange={(event)=>setNewsletterEmail(event.target.value)}/><button type="submit">Cadastrar</button></form></section>
+      <section className="newsletter"><h2>Receba os lançamentos<br/> primeiro</h2><p>{newsletterDone?'Cadastro realizado. Você receberá novidades da Aether.':'Cadastre seu e-mail e receba os próximos lançamentos em primeira mão.'}</p><form onSubmit={subscribe}><input id="newsletter-email" name="email" autoComplete="email" aria-label="Seu melhor e-mail" required type="email" placeholder="Seu melhor e-mail" value={newsletterEmail} onChange={(event)=>setNewsletterEmail(event.target.value)}/><button type="submit">Cadastrar</button></form></section>
     </main>}
 
     {modal!=='admin'&&<footer><a href="#top" className="footer-brand">AETHER</a><p>© 2026 Aether Studio.</p><a href="https://instagram.com/aether.studio3d" target="_blank" rel="noreferrer"><Camera/> @aether.studio3d</a><a href="mailto:aetherstudio.figures@gmail.com"><Mail/> aetherstudio.figures@gmail.com</a></footer>}
