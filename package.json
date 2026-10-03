@@ -9,6 +9,7 @@
     "dev:api": "node --watch server/index.js",
     "dev:web": "vite --host 0.0.0.0",
     "build": "vite build",
+    "test": "node --test",
     "start": "node server/index.js",
     "preview": "vite preview"
   },

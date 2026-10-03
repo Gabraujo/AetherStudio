@@ -14,6 +14,7 @@ import multer from 'multer';
 import { z } from 'zod';
 import { inTransaction, migrate, pool } from './db.js';
 import { createCheckoutPreference, getPayment, verifyWebhookSignature } from './mercado-pago.js';
+import { derivePaymentState } from './payment-state.js';
 import { bootstrapAdmin, loadSessionUser, normalizeEmail, publicUser, requireAdmin, requireUser } from './security.js';
 
 const app = express();
@@ -194,6 +195,8 @@ function orderDto(order, items) {
   return {
     id: order.id,
     status: order.status,
+    paymentStatus: order.payment_status || 'pending',
+    refundedCents: Number(order.refunded_cents || 0),
     totalCents: Number(order.total_cents),
     shippingAddress: order.shipping_address,
     createdAt: order.created_at,
@@ -444,7 +447,6 @@ app.post('/api/payments/webhook', async (req, res) => {
 
   try {
     const payment = await getPayment(dataId);
-    if (payment.status !== 'approved') return res.sendStatus(200);
     const orderId = payment.external_reference;
     const expectedLiveMode = process.env.MP_EXPECT_LIVE === undefined
       ? isProduction
@@ -459,17 +461,34 @@ app.post('/api/payments/webhook', async (req, res) => {
       const { rows } = await client.query('SELECT * FROM orders WHERE id = $1 FOR UPDATE', [orderId]);
       const order = rows[0];
       if (!order || Number(order.total_cents) !== Math.round(Number(payment.transaction_amount) * 100)) return;
-      if (order.status === 'pending_payment') {
-        await client.query(
-          `UPDATE orders SET status = 'paid', payment_id = $2, updated_at = NOW() WHERE id = $1`,
-          [orderId, String(payment.id)],
-        );
-      } else if (order.status === 'expired' || order.status === 'checkout_error') {
-        await client.query(
-          `UPDATE orders SET status = 'paid_after_expiry', payment_id = $2, updated_at = NOW() WHERE id = $1`,
-          [orderId, String(payment.id)],
-        );
+
+      const paymentState = derivePaymentState(payment, Number(order.total_cents));
+      if (!paymentState) throw new Error('Mercado Pago returned an invalid refunded amount.');
+
+      const paymentId = String(payment.id);
+      if (order.payment_id && order.payment_id !== paymentId) {
+        console.error(`[aether] Multiple approved payments reference order ${orderId}; review payment ${paymentId}.`);
+        return;
       }
+
+      let nextOrderStatus = order.status;
+      if (['approved', 'partially_refunded'].includes(paymentState.paymentStatus)) {
+        if (order.status === 'pending_payment') nextOrderStatus = 'paid';
+        else if (order.status === 'expired' || order.status === 'checkout_error') nextOrderStatus = 'paid_after_expiry';
+      }
+
+      const bindsPaymentId = ['approved', 'partially_refunded', 'refunded', 'in_mediation', 'charged_back']
+        .includes(paymentState.paymentStatus);
+      await client.query(
+        `UPDATE orders
+         SET status = $2,
+             payment_status = $3,
+             payment_id = CASE WHEN $4 THEN $5 ELSE payment_id END,
+             refunded_cents = GREATEST(refunded_cents, $6),
+             updated_at = NOW()
+         WHERE id = $1`,
+        [orderId, nextOrderStatus, paymentState.paymentStatus, bindsPaymentId, paymentId, paymentState.refundedCents],
+      );
     });
     res.sendStatus(200);
   } catch (error) {

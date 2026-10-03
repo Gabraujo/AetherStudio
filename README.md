@@ -114,4 +114,4 @@ Exemplo de entrada no `crontab -e` do usuário que administra o Compose (ajuste 
 - Pedidos do cliente: `GET /api/orders` (sessão autenticada)
 - Administração: `/api/admin/*` (somente a conta configurada)
 
-O estado de pedido `paid_after_expiry` indica uma aprovação tardia após a reserva de estoque expirar; revise esse caso antes de separar o produto.
+O estado de pedido `paid_after_expiry` indica uma aprovação tardia após a reserva de estoque expirar; revise esse caso antes de separar o produto. Os pedidos também exibem separadamente o status financeiro recebido do Mercado Pago. Não envie pedidos com pagamento em contestação, chargeback, reembolso ou status desconhecido sem revisar a transação diretamente no painel do provedor. Reembolsos não repõem estoque automaticamente, pois é necessário confirmar a devolução física do item.

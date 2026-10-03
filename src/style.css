@@ -100,3 +100,5 @@ img{max-width:100%}
 }
 
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important}}
+.payment-status-detail{display:block;color:#b8a58e;font-size:11px;line-height:1.55;overflow-wrap:anywhere}.admin-order-total .payment-status-detail{max-width:240px;text-align:right}
+@media(max-width:600px){.admin-order-total .payment-status-detail{max-width:none;text-align:left}}

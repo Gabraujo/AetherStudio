@@ -15,6 +15,19 @@ const orderStatuses = {
   expired: 'Reserva expirada',
   checkout_error: 'Pagamento não iniciado',
 };
+const paymentStatuses = {
+  pending: 'Pagamento pendente',
+  approved: 'Pagamento aprovado',
+  authorized: 'Pagamento autorizado',
+  in_process: 'Pagamento em processamento',
+  in_mediation: 'Contestação em análise',
+  rejected: 'Tentativa recusada',
+  cancelled: 'Tentativa cancelada',
+  refunded: 'Reembolso total',
+  partially_refunded: 'Reembolso parcial',
+  charged_back: 'Chargeback',
+  unknown: 'Status desconhecido; conferir no Mercado Pago',
+};
 
 export default function AdminPanel({ onClose, onChanged, notify }) {
   const [products, setProducts] = useState([]);
@@ -280,7 +293,7 @@ export default function AdminPanel({ onClose, onChanged, notify }) {
     {section === 'orders' && <section className="admin-orders">
       <div className="admin-list-heading"><h2>Pedidos recentes</h2><button className="secondary" onClick={refreshOrders} disabled={ordersLoading}>{ordersLoading ? 'Atualizando...' : 'Atualizar pedidos'}</button></div>
       {ordersLoading && orders.length === 0 ? <p className="admin-empty">Carregando pedidos...</p> : orders.length === 0 ? <p className="admin-empty">Nenhum pedido foi registrado ainda.</p> : orders.map((order) => <article className="admin-order" key={order.id}>
-        <div className="admin-order-top"><div><small>#{order.id.slice(0, 8).toUpperCase()} · {new Date(order.createdAt).toLocaleString('pt-BR')}</small><h3>{order.customer.name}</h3><a href={`mailto:${order.customer.email}`}>{order.customer.email}</a></div><div className="admin-order-total"><span className={`order-status ${order.status}`}>{orderStatuses[order.status] || order.status}</span><b>{money(order.totalCents)}</b></div></div>
+        <div className="admin-order-top"><div><small>#{order.id.slice(0, 8).toUpperCase()} · {new Date(order.createdAt).toLocaleString('pt-BR')}</small><h3>{order.customer.name}</h3><a href={`mailto:${order.customer.email}`}>{order.customer.email}</a></div><div className="admin-order-total"><span className={`order-status ${order.status}`}>{orderStatuses[order.status] || order.status}</span><b>{money(order.totalCents)}</b><small className="payment-status-detail">{paymentStatuses[order.paymentStatus] || paymentStatuses.unknown}{order.refundedCents>0?` · Reembolsado ${money(order.refundedCents)}`:''}</small></div></div>
         <div className="admin-order-items">{order.items.map((item, index) => <span key={`${order.id}-${index}`}>{item.quantity}× {item.productName}<b>{money(item.unitPriceCents * item.quantity)}</b></span>)}</div>
         <div className="admin-order-address"><small>Endereço de entrega</small><span>{order.shippingAddress.street}, {order.shippingAddress.number}{order.shippingAddress.district ? ` · ${order.shippingAddress.district}` : ''} · {order.shippingAddress.city}/{order.shippingAddress.state} · CEP {order.shippingAddress.postalCode}</span></div>
       </article>)}

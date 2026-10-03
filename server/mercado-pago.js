@@ -2,6 +2,24 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 
 const API_ROOT = 'https://api.mercadopago.com';
 
+export function validateCheckoutUrl(value) {
+  let checkoutUrl;
+  try {
+    checkoutUrl = new URL(value);
+  } catch {
+    throw new Error('Mercado Pago returned an invalid checkout URL.');
+  }
+  const isMercadoPagoHost = checkoutUrl.hostname === 'mercadopago.com'
+    || checkoutUrl.hostname.endsWith('.mercadopago.com')
+    || checkoutUrl.hostname === 'mercadopago.com.br'
+    || checkoutUrl.hostname.endsWith('.mercadopago.com.br');
+  if (checkoutUrl.protocol !== 'https:' || checkoutUrl.username || checkoutUrl.password || checkoutUrl.port
+    || !isMercadoPagoHost) {
+    throw new Error('Mercado Pago returned an untrusted checkout URL.');
+  }
+  return checkoutUrl.href;
+}
+
 export async function createCheckoutPreference({ order, items, buyer, shippingAddress, paymentMethod }) {
   const accessToken = process.env.MP_ACCESS_TOKEN;
   let appUrl;
@@ -85,21 +103,7 @@ export async function createCheckoutPreference({ order, items, buyer, shippingAd
     error.status = 502;
     throw error;
   }
-  let checkoutUrl;
-  try {
-    checkoutUrl = new URL(result.init_point);
-  } catch {
-    throw new Error('Mercado Pago returned an invalid checkout URL.');
-  }
-  const isMercadoPagoHost = checkoutUrl.hostname === 'mercadopago.com'
-    || checkoutUrl.hostname.endsWith('.mercadopago.com')
-    || checkoutUrl.hostname === 'mercadopago.com.br'
-    || checkoutUrl.hostname.endsWith('.mercadopago.com.br');
-  if (checkoutUrl.protocol !== 'https:' || checkoutUrl.username || checkoutUrl.password || checkoutUrl.port
-    || !isMercadoPagoHost) {
-    throw new Error('Mercado Pago returned an untrusted checkout URL.');
-  }
-  return { id: result.id, url: checkoutUrl.href };
+  return { id: result.id, url: validateCheckoutUrl(result.init_point) };
 }
 
 export function verifyWebhookSignature({ signature, requestId, dataId, secret }) {
