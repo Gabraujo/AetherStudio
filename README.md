@@ -57,6 +57,18 @@ Configure a notificação **payment** no painel Mercado Pago para `https://seudo
 
 No Compose do Coolify, `MP_EXPECT_LIVE` assume `true`; assim, o servidor ignora pagamentos de teste em produção. Para um ambiente separado de homologação com credenciais de teste, defina `MP_EXPECT_LIVE=false`. Nunca use essa opção na loja que recebe pedidos reais. Em produção, `SESSION_SECRET` deve ter pelo menos 64 bytes; `openssl rand -hex 48` gera um valor adequado. Um erro ao criar checkout deixa a reserva de estoque expirar naturalmente em 30 minutos para evitar liberar itens se o provedor tiver aceitado a solicitação apesar de um timeout.
 
+### Homologação de pagamentos
+
+Faça a primeira compra em uma implantação de homologação separada, com banco e credenciais de teste próprios; não troque a loja pública para `MP_EXPECT_LIVE=false`. Crie uma conta de vendedor e uma conta de comprador de teste no Mercado Pago, configure o webhook para a URL pública HTTPS de homologação e use o segredo correspondente à aplicação de teste. A documentação do Mercado Pago explica como criar [contas de teste](https://www.mercadopago.com.br/developers/pt/docs/checkout-pro-preferences/test-accounts) e configurar/simular [notificações de pagamento](https://www.mercadopago.com.br/developers/pt/docs/checkout-pro-preferences/payment-notifications). Para validar compras de teste, use a ferramenta **Simular** no painel de Webhooks quando aplicável; não presuma que cada pagamento de teste enviará automaticamente a mesma notificação que uma transação de produção.
+
+## E-mails transacionais
+
+O servidor pode enviar recuperação de senha, confirmação de pedido, mudanças de pagamento e atualizações de envio usando a API do Resend. Configure `RESEND_API_KEY` e `EMAIL_FROM` no ambiente; use como remetente um endereço de um domínio verificado no Resend. Antes de enviar para clientes, publique os registros SPF e DKIM fornecidos pelo provedor e configure DMARC no DNS. Não use o endereço Gmail de administração como remetente do domínio.
+
+As mensagens de pedido ficam numa fila persistida no PostgreSQL e são reenviadas automaticamente em caso de falha temporária. A recuperação de senha usa token aleatório de uso único, armazena somente seu hash e expira em 30 minutos. O link só aparece na tela de login quando o provedor está configurado. Se um e-mail ficar em estado final de falha, revise a configuração do remetente e os registros DNS no Resend antes de solicitar nova notificação.
+
+`EMAIL_FROM` deve estar no formato `Aether Studio <pedidos@aetherstudio3d.com>`, ajustado para o endereço verificado. Não coloque `RESEND_API_KEY` no GitHub. Para trocar por SMTP ou outro provedor, substitua a camada `server/email.js`; as regras de recuperação e a fila de notificações ficam no backend.
+
 ## Deploy em VPS com Coolify
 
 Esta opção usa o proxy HTTPS do Coolify. Use `docker-compose.coolify.yml`; ele publica a aplicação na rede interna do Docker e mantém PostgreSQL e imagens em volumes persistentes. Não use `docker-compose.yml` neste fluxo, pois esse arquivo inclui um Caddy próprio que ocupa as portas 80 e 443 do servidor.

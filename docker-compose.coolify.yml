@@ -38,6 +38,8 @@ services:
       MP_ACCESS_TOKEN: ${MP_ACCESS_TOKEN:-}
       MP_WEBHOOK_SECRET: ${MP_WEBHOOK_SECRET:-}
       MP_EXPECT_LIVE: ${MP_EXPECT_LIVE:-true}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
     depends_on:
       db:
         condition: service_healthy

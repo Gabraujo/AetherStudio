@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -16,6 +16,7 @@ import { inTransaction, migrate, pool } from './db.js';
 import { createCheckoutPreference, getPayment, verifyWebhookSignature } from './mercado-pago.js';
 import { derivePaymentState } from './payment-state.js';
 import { bootstrapAdmin, loadSessionUser, normalizeEmail, publicUser, requireAdmin, requireUser } from './security.js';
+import { emailEnabled, enqueueEmail, sendTransactionalEmail, startEmailWorker } from './email.js';
 
 const app = express();
 const rootDir = fileURLToPath(new URL('../', import.meta.url));
@@ -112,6 +113,7 @@ app.use('/api', loadSessionUser);
 
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 12, standardHeaders: true, legacyHeaders: false });
 const checkoutLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 8, standardHeaders: true, legacyHeaders: false });
+const passwordResetLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false });
 const dummyPasswordHash = await bcrypt.hash(randomUUID(), 12);
 const emailSchema = z.string().trim().email().max(254).transform(normalizeEmail);
 const passwordSchema = z.string().min(10).max(72).refine((password) => Buffer.byteLength(password, 'utf8') <= 72, {
@@ -197,6 +199,8 @@ function orderDto(order, items) {
     status: order.status,
     paymentStatus: order.payment_status || 'pending',
     refundedCents: Number(order.refunded_cents || 0),
+    fulfillmentStatus: order.fulfillment_status || 'not_paid',
+    trackingCode: order.tracking_code || null,
     totalCents: Number(order.total_cents),
     shippingAddress: order.shipping_address,
     createdAt: order.created_at,
@@ -214,7 +218,10 @@ app.get('/api/health', async (_req, res) => {
 });
 
 app.get('/api/config', (_req, res) => {
-  res.json({ paymentsEnabled: Boolean(process.env.MP_ACCESS_TOKEN && process.env.MP_WEBHOOK_SECRET && process.env.APP_URL) });
+  res.json({
+    paymentsEnabled: Boolean(process.env.MP_ACCESS_TOKEN && process.env.MP_WEBHOOK_SECRET && process.env.APP_URL),
+    emailEnabled: emailEnabled(),
+  });
 });
 
 app.post('/api/newsletter', async (req, res) => {
@@ -286,6 +293,58 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
   res.json({ user: publicUser(user) });
 });
 
+app.post('/api/auth/password/forgot', passwordResetLimiter, async (req, res) => {
+  if (!emailEnabled()) return res.status(503).json({ error: 'A recuperação de senha ainda não está configurada.' });
+  const { email } = parse(z.object({ email: emailSchema }), req.body);
+  const { rows } = await pool.query('SELECT id, name, email FROM users WHERE email=$1', [email]);
+  const user = rows[0];
+  if (user) {
+    const token = randomBytes(32).toString('base64url');
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    await inTransaction(async (client) => {
+      await client.query('DELETE FROM password_reset_tokens WHERE user_id=$1', [user.id]);
+      await client.query(
+        "INSERT INTO password_reset_tokens (token_hash, user_id, expires_at) VALUES ($1, $2, NOW() + INTERVAL '30 minutes')",
+        [tokenHash, user.id],
+      );
+    });
+    try {
+      await sendTransactionalEmail({
+        recipient: user.email,
+        template: 'password-reset',
+        payload: { name: user.name, url: `${new URL(process.env.APP_URL).origin}/#reset_token=${encodeURIComponent(token)}` },
+        idempotencyKey: `password-reset-${randomUUID()}`,
+      });
+    } catch (error) {
+      await pool.query('DELETE FROM password_reset_tokens WHERE token_hash=$1', [tokenHash]);
+      console.error('[aether] Password reset email delivery failed:', error.message);
+    }
+  }
+  res.status(202).json({ message: 'Se a conta existir, enviaremos um link para redefinir a senha.' });
+});
+
+app.post('/api/auth/password/reset', passwordResetLimiter, async (req, res) => {
+  const data = parse(z.object({ token: z.string().min(32).max(128), password: passwordSchema }), req.body);
+  const tokenHash = createHash('sha256').update(data.token).digest('hex');
+  const passwordHash = await bcrypt.hash(data.password, 12);
+  await inTransaction(async (client) => {
+    const { rows } = await client.query(
+      'SELECT user_id FROM password_reset_tokens WHERE token_hash=$1 AND expires_at>NOW() FOR UPDATE',
+      [tokenHash],
+    );
+    if (!rows[0]) {
+      const error = new Error('Este link expirou ou já foi utilizado. Solicite outro link de recuperação.');
+      error.status = 400;
+      throw error;
+    }
+    const userId = rows[0].user_id;
+    await client.query('UPDATE users SET password_hash=$2 WHERE id=$1', [userId, passwordHash]);
+    await client.query('DELETE FROM password_reset_tokens WHERE user_id=$1', [userId]);
+    await client.query("DELETE FROM aether_sessions WHERE sess->>'userId'=$1", [userId]);
+  });
+  res.json({ message: 'Senha atualizada. Entre com sua nova senha.' });
+});
+
 app.post('/api/auth/logout', requireUser, (req, res, next) => {
   req.session.destroy((error) => {
     if (error) return next(error);
@@ -346,6 +405,12 @@ async function expireReservations() {
     `SELECT id FROM orders WHERE status = 'pending_payment' AND reservation_expires_at < NOW() LIMIT 50`,
   );
   for (const order of rows) await releaseReservation(order.id, 'expired');
+  await pool.query('DELETE FROM password_reset_tokens WHERE expires_at < NOW()');
+  await pool.query(
+    `DELETE FROM email_outbox
+     WHERE (status='sent' AND sent_at < NOW() - INTERVAL '30 days')
+        OR (status='dead' AND created_at < NOW() - INTERVAL '30 days')`,
+  );
 }
 
 app.post('/api/orders', requireUser, checkoutLimiter, async (req, res) => {
@@ -424,7 +489,20 @@ app.post('/api/orders', requireUser, checkoutLimiter, async (req, res) => {
       shippingAddress: data.shippingAddress,
       paymentMethod: data.paymentMethod,
     });
-    await pool.query('UPDATE orders SET payment_preference_id = $2, updated_at = NOW() WHERE id = $1', [orderId, preference.id]);
+    await inTransaction(async (client) => {
+      await client.query('UPDATE orders SET payment_preference_id = $2, updated_at = NOW() WHERE id = $1', [orderId, preference.id]);
+      await enqueueEmail(client, {
+        eventKey: `order-created:${orderId}`,
+        recipient: req.user.email,
+        template: 'order-created',
+        payload: {
+          name: req.user.name,
+          orderId,
+          totalCents: created.order.total_cents,
+          checkoutUrl: preference.url,
+        },
+      });
+    });
     return res.status(201).json({ orderId, checkoutUrl: preference.url });
   } catch (error) {
     // A timeout or network error can happen after Mercado Pago accepted the
@@ -483,12 +561,35 @@ app.post('/api/payments/webhook', async (req, res) => {
         `UPDATE orders
          SET status = $2,
              payment_status = $3,
+             fulfillment_status = CASE WHEN $3='approved' AND fulfillment_status='not_paid' THEN 'processing' ELSE fulfillment_status END,
              payment_id = CASE WHEN $4 THEN $5 ELSE payment_id END,
              refunded_cents = GREATEST(refunded_cents, $6),
              updated_at = NOW()
          WHERE id = $1`,
         [orderId, nextOrderStatus, paymentState.paymentStatus, bindsPaymentId, paymentId, paymentState.refundedCents],
       );
+
+      if (order.payment_status !== paymentState.paymentStatus || order.status !== nextOrderStatus) {
+        const { rows: [customer] } = await client.query('SELECT email, name FROM users WHERE id=$1', [order.user_id]);
+        const statusLabels = {
+          approved: 'Pagamento aprovado', authorized: 'Pagamento autorizado', in_process: 'Pagamento em análise',
+          in_mediation: 'Pagamento em contestação', rejected: 'Pagamento recusado', cancelled: 'Pagamento cancelado',
+          refunded: 'Pagamento reembolsado', partially_refunded: 'Pagamento parcialmente reembolsado',
+          charged_back: 'Pagamento contestado (chargeback)', unknown: 'Status de pagamento desconhecido',
+        };
+        await enqueueEmail(client, {
+          eventKey: `payment-update:${paymentId}:${paymentState.paymentStatus}:${paymentState.refundedCents}`,
+          recipient: customer.email,
+          template: 'payment-update',
+          payload: {
+            name: customer.name,
+            orderId,
+            totalCents: order.total_cents,
+            refundedCents: paymentState.refundedCents,
+            statusLabel: statusLabels[paymentState.paymentStatus] || statusLabels.unknown,
+          },
+        });
+      }
     });
     res.sendStatus(200);
   } catch (error) {
@@ -587,6 +688,60 @@ app.get('/api/admin/orders', requireUser, requireAdmin, async (_req, res) => {
   })));
 });
 
+app.put('/api/admin/orders/:id/fulfillment', requireUser, requireAdmin, async (req, res) => {
+  const data = parse(z.object({
+    status: z.enum(['shipped', 'delivered']),
+    trackingCode: z.string().trim().max(100).optional().default(''),
+  }), req.body);
+  const updated = await inTransaction(async (client) => {
+    const { rows: [order] } = await client.query(
+      `SELECT o.*, u.email AS customer_email, u.name AS customer_name
+       FROM orders o JOIN users u ON u.id=o.user_id WHERE o.id=$1 FOR UPDATE OF o`,
+      [req.params.id],
+    );
+    if (!order) {
+      const error = new Error('Pedido não encontrado.');
+      error.status = 404;
+      throw error;
+    }
+    if (order.status !== 'paid' || order.payment_status !== 'approved') {
+      const error = new Error('Só é possível atualizar a entrega de pedidos pagos e sem contestação ou reembolso.');
+      error.status = 409;
+      throw error;
+    }
+    const expectedCurrent = data.status === 'shipped' ? 'processing' : 'shipped';
+    if (order.fulfillment_status === data.status) return order;
+    if (order.fulfillment_status !== expectedCurrent) {
+      const error = new Error('Atualize o pedido na sequência: em separação, enviado e entregue.');
+      error.status = 409;
+      throw error;
+    }
+    if (data.status === 'shipped' && !data.trackingCode) {
+      const error = new Error('Informe o código de rastreio antes de marcar o pedido como enviado.');
+      error.status = 400;
+      throw error;
+    }
+    const { rows: [saved] } = await client.query(
+      "UPDATE orders SET fulfillment_status=$2, tracking_code=COALESCE(NULLIF($3, ''), tracking_code), updated_at=NOW() WHERE id=$1 RETURNING *",
+      [order.id, data.status, data.trackingCode || null],
+    );
+    const statusLabel = data.status === 'shipped' ? 'Pedido enviado' : 'Pedido entregue';
+    await enqueueEmail(client, {
+      eventKey: `fulfillment-update:${order.id}:${data.status}`,
+      recipient: order.customer_email,
+      template: 'fulfillment-update',
+      payload: {
+        name: order.customer_name,
+        orderId: order.id,
+        statusLabel,
+        trackingCode: saved.tracking_code,
+      },
+    });
+    return saved;
+  });
+  res.json({ fulfillmentStatus: updated.fulfillment_status, trackingCode: updated.tracking_code || null });
+});
+
 app.use('/uploads', express.static(uploadsDir, { maxAge: isProduction ? '30d' : 0, immutable: isProduction }));
 
 if (existsSync(distDir)) {
@@ -611,6 +766,7 @@ app.use((error, _req, res, _next) => {
 async function start() {
   await migrate();
   await bootstrapAdmin();
+  startEmailWorker(pool);
   const server = app.listen(port, '0.0.0.0', () => console.info(`[aether] API pronta na porta ${port}.`));
   const cleanupTimer = setInterval(() => expireReservations().catch((error) => console.error('[aether] Reservation cleanup failed:', error.message)), 60_000);
   cleanupTimer.unref();

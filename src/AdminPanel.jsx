@@ -28,6 +28,12 @@ const paymentStatuses = {
   charged_back: 'Chargeback',
   unknown: 'Status desconhecido; conferir no Mercado Pago',
 };
+const fulfillmentStatuses = {
+  not_paid: 'Aguardando pagamento',
+  processing: 'Em separação',
+  shipped: 'Enviado',
+  delivered: 'Entregue',
+};
 
 export default function AdminPanel({ onClose, onChanged, notify }) {
   const [products, setProducts] = useState([]);
@@ -41,6 +47,8 @@ export default function AdminPanel({ onClose, onChanged, notify }) {
   const [loading, setLoading] = useState(true);
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [featuredSaving, setFeaturedSaving] = useState(false);
+  const [trackingCodes, setTrackingCodes] = useState({});
+  const [updatingOrderId, setUpdatingOrderId] = useState(null);
 
   async function refresh() {
     setLoading(true);
@@ -101,6 +109,22 @@ export default function AdminPanel({ onClose, onChanged, notify }) {
       notify(error.message, 'error');
     } finally {
       setOrdersLoading(false);
+    }
+  }
+
+  async function updateFulfillment(order, status) {
+    setUpdatingOrderId(order.id);
+    try {
+      await api(`/api/admin/orders/${order.id}/fulfillment`, {
+        method: 'PUT',
+        body: { status, trackingCode: trackingCodes[order.id]?.trim() || '' },
+      });
+      notify(status === 'shipped' ? 'Pedido enviado. O cliente receberá um e-mail com o rastreio.' : 'Pedido marcado como entregue. O cliente receberá uma atualização por e-mail.');
+      await refreshOrders();
+    } catch (error) {
+      notify(error.message, 'error');
+    } finally {
+      setUpdatingOrderId(null);
     }
   }
 
@@ -296,6 +320,10 @@ export default function AdminPanel({ onClose, onChanged, notify }) {
         <div className="admin-order-top"><div><small>#{order.id.slice(0, 8).toUpperCase()} · {new Date(order.createdAt).toLocaleString('pt-BR')}</small><h3>{order.customer.name}</h3><a href={`mailto:${order.customer.email}`}>{order.customer.email}</a></div><div className="admin-order-total"><span className={`order-status ${order.status}`}>{orderStatuses[order.status] || order.status}</span><b>{money(order.totalCents)}</b><small className="payment-status-detail">{paymentStatuses[order.paymentStatus] || paymentStatuses.unknown}{order.refundedCents>0?` · Reembolsado ${money(order.refundedCents)}`:''}</small></div></div>
         <div className="admin-order-items">{order.items.map((item, index) => <span key={`${order.id}-${index}`}>{item.quantity}× {item.productName}<b>{money(item.unitPriceCents * item.quantity)}</b></span>)}</div>
         <div className="admin-order-address"><small>Endereço de entrega</small><span>{order.shippingAddress.street}, {order.shippingAddress.number}{order.shippingAddress.district ? ` · ${order.shippingAddress.district}` : ''} · {order.shippingAddress.city}/{order.shippingAddress.state} · CEP {order.shippingAddress.postalCode}</span></div>
+      {order.status === 'paid' && order.paymentStatus === 'approved' && order.fulfillmentStatus !== 'delivered' && <div className="fulfillment-control">
+        <span>Entrega: {fulfillmentStatuses[order.fulfillmentStatus] || fulfillmentStatuses.not_paid}</span>
+        {order.fulfillmentStatus === 'processing' ? <><input aria-label="Código de rastreio" placeholder="Código de rastreio" value={trackingCodes[order.id] || ''} onChange={(event) => setTrackingCodes({ ...trackingCodes, [order.id]: event.target.value })}/><button className="secondary" disabled={updatingOrderId === order.id} onClick={() => updateFulfillment(order, 'shipped')}>Marcar enviado</button></> : <button className="secondary" disabled={updatingOrderId === order.id} onClick={() => updateFulfillment(order, 'delivered')}>Marcar entregue</button>}
+      </div>}
       </article>)}
       {!ordersLoading && orders.length >= 200 && <p className="admin-empty">Exibindo os 200 pedidos mais recentes.</p>}
     </section>}

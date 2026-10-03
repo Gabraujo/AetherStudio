@@ -23,6 +23,12 @@ const paymentStatusLabel = {
   partially_refunded: 'Reembolso parcial confirmado.',
   unknown: 'Atualização de pagamento recebida; confirme com a loja.',
 };
+const fulfillmentLabel = {
+  not_paid: 'Aguardando pagamento',
+  processing: 'Em separação',
+  shipped: 'Enviado',
+  delivered: 'Entregue',
+};
 
 class AppErrorBoundary extends React.Component {
   state = { hasError: false, error: null };
@@ -106,12 +112,14 @@ function App() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [paymentsEnabled, setPaymentsEnabled] = useState(false);
+  const [emailEnabled, setEmailEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [resetToken, setResetToken] = useState('');
   const [name, setName] = useState('');
   const [newsletterEmail, setNewsletterEmail] = useState('');
   const [newsletterDone, setNewsletterDone] = useState(false);
@@ -162,6 +170,7 @@ function App() {
         setProducts(catalog);
         setUser(session.user);
         setPaymentsEnabled(config.paymentsEnabled);
+        setEmailEnabled(config.emailEnabled);
         setLoading(false);
       })
       .catch((error) => {
@@ -170,6 +179,14 @@ function App() {
         notify(`Não foi possível conectar à loja. ${error.message}`, 'error');
       });
     return () => { alive = false; };
+  }, []);
+
+  useEffect(() => {
+    const token = new URLSearchParams(window.location.hash.slice(1)).get('reset_token');
+    if (token) {
+      setResetToken(token);
+      setModal('reset');
+    }
   }, []);
 
   useEffect(() => {
@@ -306,6 +323,40 @@ function App() {
     }
   }
 
+  async function requestPasswordReset(event) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      const result = await api('/api/auth/password/forgot', { method: 'POST', body: { email } });
+      notify(result.message);
+      setModal('login');
+    } catch (error) {
+      notify(error.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resetPassword(event) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      const result = await api('/api/auth/password/reset', {
+        method: 'POST',
+        body: { token: resetToken, password: newPassword },
+      });
+      setNewPassword('');
+      setResetToken('');
+      window.history.replaceState({}, '', window.location.pathname);
+      setModal('login');
+      notify(result.message);
+    } catch (error) {
+      notify(error.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function checkout(event) {
     event.preventDefault();
     if (!user) {
@@ -393,6 +444,9 @@ function App() {
     {modal&&modal!=='admin'&&<div className="overlay" onClick={()=>setModal('')}>
       <section className={`dialog ${modal==='cart'||modal==='account'?'cart-dialog':''}`} onClick={(event)=>event.stopPropagation()} aria-modal="true" role="dialog">
         <button className="close" onClick={()=>setModal('')} aria-label="Fechar"><X/></button>
+        {modal==='login'&&emailEnabled&&<button className="switch-auth forgot-link" onClick={()=>setModal('forgot')}>Esqueci minha senha</button>}
+        {modal==='forgot'&&<><div className="eyebrow">RECUPERAÇÃO DE CONTA</div><h2>Redefina sua senha<span>.</span></h2><p>Informe o e-mail da conta. Se ele estiver cadastrado, enviaremos um link temporário.</p><form className="login-form" onSubmit={requestPasswordReset}><label>E-mail<input type="email" required autoComplete="email" value={email} onChange={(event)=>setEmail(event.target.value)} placeholder="voce@email.com"/></label><button className="add-button" disabled={busy}>{busy?'Enviando...':'Enviar link de recuperação'}</button></form><button className="switch-auth" onClick={()=>setModal('login')}>Voltar para entrar</button></>}
+        {modal==='reset'&&<><div className="eyebrow">RECUPERAÇÃO DE CONTA</div><h2>Crie uma nova senha<span>.</span></h2><p>Use pelo menos 10 caracteres. Este link é de uso único e expira em 30 minutos.</p><form className="login-form" onSubmit={resetPassword}><label>Nova senha<input type="password" required minLength="10" autoComplete="new-password" value={newPassword} onChange={(event)=>setNewPassword(event.target.value)} placeholder="Pelo menos 10 caracteres"/></label><button className="add-button" disabled={busy||!resetToken}>{busy?'Salvando...':'Salvar nova senha'}</button></form></>}
         {modal==='cart'&&<><div className="eyebrow">SUA SELEÇÃO</div><h2>Carrinho ({count})</h2>
           {cart.length===0?<p className="empty">Seu carrinho está vazio. Explore o catálogo e encontre sua próxima figure.</p>:<>
             <div className="cart-items">{cart.map((item)=><div className="cart-item" key={item.id}><div className="cart-thumb">{item.imageUrl?<img src={item.imageUrl} alt=""/>:<span className="sphere"/>}</div><div className="cart-info"><b>{item.name}</b><span>{money(item.priceCents)}</span><div className="quantity"><button onClick={()=>changeQuantity(item.id,-1)} aria-label="Diminuir"><Minus size={13}/></button>{item.quantity}<button onClick={()=>changeQuantity(item.id,1)} aria-label="Aumentar"><Plus size={13}/></button></div></div></div>)}</div>
@@ -405,7 +459,7 @@ function App() {
           <button className="switch-auth" onClick={()=>setAuthMode(authMode==='login'?'register':'login')}>{authMode==='login'?'Ainda não tem conta? Criar conta':'Já tem uma conta? Entrar'}</button><small className="checkout-note">Sua sessão é protegida e os pedidos ficam vinculados a esta conta.</small>
         </>}
 
-        {modal==='account'&&<><div className="eyebrow">ÁREA DO CLIENTE</div><h2>Olá, {user?.name?.split(' ')[0]}<span>.</span></h2><p>{user?.email}</p>{user?.isAdmin&&<button className="add-button admin-open" onClick={()=>setModal('admin')}>Abrir painel de catálogo <ArrowRight size={16}/></button>}<div className="account-section"><div className="account-section-heading"><h3>Meus pedidos</h3><span>{orders.length}</span></div>{orders.length===0?<p className="empty-orders">Seus pedidos e atualizações de pagamento aparecerão aqui.</p>:orders.map((order)=><article className="order-card" key={order.id}><div className="order-title"><b>Pedido #{order.id.slice(0,8).toUpperCase()}</b><span className={`order-status ${order.status}`}>{statusLabel[order.status]||order.status}</span></div><small>{new Date(order.createdAt).toLocaleDateString('pt-BR')} · {money(order.totalCents)}</small>{paymentStatusLabel[order.paymentStatus]&&<small className="payment-status-detail">{paymentStatusLabel[order.paymentStatus]}{order.refundedCents>0?` · Reembolsado: ${money(order.refundedCents)}`:''}</small>}<div className="order-lines">{order.items.map((item,index)=><span key={`${order.id}-${index}`}>{item.quantity}× {item.productName}</span>)}</div><small className="order-address">Entrega: {order.shippingAddress.street}, {order.shippingAddress.number} · {order.shippingAddress.city}/{order.shippingAddress.state} · CEP {order.shippingAddress.postalCode}</small></article>)}<form className="password-form" onSubmit={changePassword}><h3>Segurança da conta</h3><label>Senha atual<input type="password" required value={currentPassword} onChange={event=>setCurrentPassword(event.target.value)} autoComplete="current-password"/></label><label>Nova senha<input type="password" required minLength="10" value={newPassword} onChange={event=>setNewPassword(event.target.value)} autoComplete="new-password"/></label><button className="secondary" disabled={busy}>{busy?'Salvando...':'Alterar senha'}</button></form><button className="text-button logout" onClick={logout}>Sair da conta</button></div></>}
+        {modal==='account'&&<><div className="eyebrow">ÁREA DO CLIENTE</div><h2>Olá, {user?.name?.split(' ')[0]}<span>.</span></h2><p>{user?.email}</p>{user?.isAdmin&&<button className="add-button admin-open" onClick={()=>setModal('admin')}>Abrir painel de catálogo <ArrowRight size={16}/></button>}<div className="account-section"><div className="account-section-heading"><h3>Meus pedidos</h3><span>{orders.length}</span></div>{orders.length===0?<p className="empty-orders">Seus pedidos e atualizações de pagamento aparecerão aqui.</p>:orders.map((order)=><article className="order-card" key={order.id}><div className="order-title"><b>Pedido #{order.id.slice(0,8).toUpperCase()}</b><span className={`order-status ${order.status}`}>{statusLabel[order.status]||order.status}</span></div><small>{new Date(order.createdAt).toLocaleDateString('pt-BR')} · {money(order.totalCents)}</small><small className="payment-status-detail">Entrega: {fulfillmentLabel[order.fulfillmentStatus] || fulfillmentLabel.not_paid}{order.trackingCode && <> · Rastreio {order.trackingCode}</>}</small>{paymentStatusLabel[order.paymentStatus]&&<small className="payment-status-detail">{paymentStatusLabel[order.paymentStatus]}{order.refundedCents>0?` · Reembolsado: ${money(order.refundedCents)}`:''}</small>}<div className="order-lines">{order.items.map((item,index)=><span key={`${order.id}-${index}`}>{item.quantity}× {item.productName}</span>)}</div><small className="order-address">Entrega: {order.shippingAddress.street}, {order.shippingAddress.number} · {order.shippingAddress.city}/{order.shippingAddress.state} · CEP {order.shippingAddress.postalCode}</small></article>)}<form className="password-form" onSubmit={changePassword}><h3>Segurança da conta</h3><label>Senha atual<input type="password" required value={currentPassword} onChange={event=>setCurrentPassword(event.target.value)} autoComplete="current-password"/></label><label>Nova senha<input type="password" required minLength="10" value={newPassword} onChange={event=>setNewPassword(event.target.value)} autoComplete="new-password"/></label><button className="secondary" disabled={busy}>{busy?'Salvando...':'Alterar senha'}</button></form><button className="text-button logout" onClick={logout}>Sair da conta</button></div></>}
 
         {modal==='checkout'&&<><div className="eyebrow">ENTREGA E PAGAMENTO</div><h2>Finalize seu pedido<span>.</span></h2><p>Confira o endereço e escolha uma forma de pagamento. A transação será concluída em ambiente seguro.</p><form className="login-form checkout-form" onSubmit={checkout}><label>CEP<input required inputMode="numeric" autoComplete="postal-code" maxLength="9" pattern="[0-9]{5}-?[0-9]{3}" value={address.postalCode} onChange={(event)=>{const digits=event.target.value.replace(/\D/g,'').slice(0,8);setAddress((current)=>({...current,postalCode:digits.length>5?`${digits.slice(0,5)}-${digits.slice(5)}`:digits}));}} placeholder="00000-000" aria-describedby="cep-status"/>{cepLookup==='idle'?<small id="cep-status" className="cep-status">Ao completar o CEP, consultamos o ViaCEP para preencher os dados disponíveis.</small>:<small id="cep-status" className={`cep-status ${cepLookup}`} role="status" aria-live="polite">{cepLookup==='loading'?'Consultando endereço pelo CEP...':cepLookup==='success'?'Endereço localizado. Confira os dados e informe o número.':cepLookup==='not-found'?'CEP não encontrado. Confira o número ou preencha o endereço manualmente.':'Não foi possível consultar o CEP agora. Você pode preencher o endereço manualmente.'}</small>}</label><label>Rua<input required autoComplete="address-line1" value={address.street} onChange={(event)=>setAddress((current)=>({...current,street:event.target.value}))} placeholder="Nome da rua"/></label><div className="checkout-row"><label>Número<input required autoComplete="address-line2" value={address.number} onChange={(event)=>setAddress((current)=>({...current,number:event.target.value}))}/></label><label>Bairro<input autoComplete="address-level3" value={address.district} onChange={(event)=>setAddress((current)=>({...current,district:event.target.value}))}/></label></div><label>Cidade<input required autoComplete="address-level2" value={address.city} onChange={(event)=>setAddress((current)=>({...current,city:event.target.value}))}/></label><label>Estado (UF)<input required minLength="2" maxLength="2" autoComplete="address-level1" value={address.state} onChange={(event)=>setAddress((current)=>({...current,state:event.target.value.toUpperCase()}))} placeholder="SP"/></label><fieldset className="payment-choice"><legend>Forma de pagamento</legend><label className={`payment-option ${paymentMethod==='pix'?'selected':''}`}><input type="radio" name="paymentMethod" value="pix" checked={paymentMethod==='pix'} onChange={()=>setPaymentMethod('pix')}/><span className="payment-mark pix-mark">PIX</span><span className="payment-copy"><b>Pix</b><small>Pix será sugerido na próxima etapa; você poderá confirmar ou escolher outra forma.</small></span></label><label className={`payment-option ${paymentMethod==='other'?'selected':''}`}><input type="radio" name="paymentMethod" value="other" checked={paymentMethod==='other'} onChange={()=>setPaymentMethod('other')}/><span className="payment-mark card-mark">•••</span><span className="payment-copy"><b>Outras opções</b><small>Escolha cartão e outros meios disponíveis na próxima etapa.</small></span></label><small className="checkout-note">A disponibilidade do Pix depende das opções habilitadas para esta compra.</small></fieldset><div className="cart-total"><span>Total · frete grátis</span><b>{money(total)}</b></div><button className="add-button" disabled={busy||!paymentsEnabled}>{busy?'Preparando pagamento...':'Continuar para pagamento'}</button>{!paymentsEnabled&&<small className="checkout-note">A finalização online estará disponível em breve.</small>}</form></>}
       </section>

@@ -102,3 +102,30 @@ img{max-width:100%}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important}}
 .payment-status-detail{display:block;color:#b8a58e;font-size:11px;line-height:1.55;overflow-wrap:anywhere}.admin-order-total .payment-status-detail{max-width:240px;text-align:right}
 @media(max-width:600px){.admin-order-total .payment-status-detail{max-width:none;text-align:left}}
+
+@media(prefers-reduced-motion:no-preference){
+  :root{--ease-luxe:cubic-bezier(.2,.75,.25,1)}
+  .hero-inner{animation:aether-rise-in .8s var(--ease-luxe) both}
+  .hero-featured-background{animation:aether-fade-in 1.1s ease both}
+  .product-photo .figure-image{transition:transform .7s var(--ease-luxe),filter .5s ease}
+  .product-photo .sphere{transition:transform .7s var(--ease-luxe),box-shadow .7s ease}
+  .add-button,.outline-button,.category-list button,.newsletter form button,.secondary,.icon-button{transition:background-color .24s ease,border-color .24s ease,color .24s ease,transform .24s var(--ease-luxe),box-shadow .24s ease}
+  .overlay{animation:aether-fade-in .2s ease both}
+  .dialog{animation:aether-dialog-in .32s var(--ease-luxe) both}
+  .notice{animation:aether-toast-in .32s var(--ease-luxe) both}
+}
+@media(prefers-reduced-motion:no-preference) and (hover:hover){
+  .product-photo:hover .figure-image{transform:scale(1.045)}
+  .product-photo:hover .sphere{transform:scale(1.06);box-shadow:0 8px 42px #d1b69238}
+  .category-list button:hover,.add-button:hover:not(:disabled),.outline-button:hover{transform:translateY(-2px)}
+  .icon-button:hover{transform:translateY(-1px)}
+}
+@keyframes aether-fade-in{from{opacity:0}to{opacity:1}}
+@keyframes aether-rise-in{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+@keyframes aether-dialog-in{from{opacity:0;transform:translateY(10px) scale(.99)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes aether-toast-in{from{opacity:0;transform:translate(-50%,-8px)}to{opacity:1;transform:translate(-50%,0)}}
+.forgot-link{position:absolute;top:24px;left:24px;margin:0;padding:6px 0;font-size:11px}
+.fulfillment-control{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:13px;padding-top:12px;border-top:1px solid var(--line)}
+.fulfillment-control>span{margin-right:auto;color:#c8b99f;font-size:11px}
+.fulfillment-control input{min-width:180px;max-width:230px;padding:10px 12px;border:1px solid #37302a;background:#0b0a09;color:#eee7dd;font:inherit;font-size:11px}
+.fulfillment-control input:focus{outline:2px solid var(--gold);outline-offset:2px}
