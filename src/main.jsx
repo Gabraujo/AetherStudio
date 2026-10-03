@@ -101,6 +101,84 @@ function heroDividerLayout(position, count) {
   };
 }
 
+function RatingStars({ rating, label }) {
+  return <span className="rating-stars" role="img" aria-label={label || `${rating} de 5 estrelas`}>
+    {[1, 2, 3, 4, 5].map((star) => <span className={star <= Math.round(rating) ? 'filled' : ''} key={star}>★</span>)}
+  </span>;
+}
+
+function ProductDetail({ productId, user, onBack, onAddToCart, onLogin, notify }) {
+  const [detail, setDetail] = useState(null);
+  const [loadingDetail, setLoadingDetail] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [rating, setRating] = useState(5);
+  const [comment, setComment] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setLoadingDetail(true);
+    setLoadError('');
+    api(`/api/products/${productId}`)
+      .then((result) => {
+        if (!active) return;
+        setDetail(result);
+        setRating(result.ownReview?.rating || 5);
+        setComment(result.ownReview?.comment || '');
+        document.title = `${result.product.name} | Aether Studio`;
+      })
+      .catch((error) => { if (active) setLoadError(error.message); })
+      .finally(() => { if (active) setLoadingDetail(false); });
+    return () => { active = false; };
+  }, [productId, user?.id]);
+
+  async function submitReview(event) {
+    event.preventDefault();
+    setSubmitting(true);
+    try {
+      await api(`/api/products/${productId}/reviews`, { method: 'POST', body: { rating, comment } });
+      setDetail(await api(`/api/products/${productId}`));
+      notify('Sua avaliação foi salva. Obrigado por compartilhar sua experiência.');
+    } catch (error) {
+      notify(error.message, 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (loadingDetail) return <section className="product-detail-state" aria-live="polite">Carregando figure...</section>;
+  if (loadError || !detail) return <section className="product-detail-state" role="alert"><p>{loadError || 'Não foi possível encontrar esta figure.'}</p><button className="secondary" onClick={onBack}>Voltar ao catálogo</button></section>;
+
+  const { product } = detail;
+  return <section className="product-detail-page">
+    <button type="button" className="product-back" onClick={onBack}>← Voltar ao catálogo</button>
+    <div className="product-detail-grid">
+      <div className="product-detail-image">{product.imageUrl ? <img src={product.imageUrl} alt={product.name}/> : <span className="sphere"/>}{product.stock === 0 && <span className="sold-out">ESGOTADO</span>}</div>
+      <div className="product-detail-copy">
+        <span className="eyebrow">{product.category} · AETHER STUDIO</span>
+        <h1>{product.name}</h1>
+        <div className="product-rating-summary"><RatingStars rating={detail.averageRating}/><span>{detail.reviewCount ? `${detail.averageRating.toLocaleString('pt-BR')} · ${detail.reviewCount} ${detail.reviewCount === 1 ? 'avaliação' : 'avaliações'}` : 'Ainda sem avaliações'}</span></div>
+        <div className="product-detail-price"><strong>{money(product.priceCents)}</strong>{product.compareAtCents > product.priceCents && <del>{money(product.compareAtCents)}</del>}</div>
+        <p className="product-detail-description">{product.description || 'Uma peça selecionada para valorizar sua coleção.'}</p>
+        <p className={`product-availability ${product.stock ? '' : 'unavailable'}`}>{product.stock ? `${product.stock} ${product.stock === 1 ? 'unidade disponível' : 'unidades disponíveis'}` : 'Indisponível no momento'}</p>
+        <button type="button" className="add-button product-detail-add" disabled={!product.stock} onClick={() => onAddToCart(product)}>{product.stock ? 'Adicionar ao carrinho' : 'Figure esgotada'}</button>
+        <p className="product-shipping-note">Frete grátis para todo o Brasil.</p>
+      </div>
+    </div>
+    <section className="product-reviews" aria-labelledby="reviews-heading">
+      <div className="product-reviews-heading"><div><span className="eyebrow">EXPERIÊNCIAS REAIS</span><h2 id="reviews-heading">Avaliações</h2></div><span>{detail.reviewCount} {detail.reviewCount === 1 ? 'avaliação' : 'avaliações'}</span></div>
+      {user && detail.canReview ? <form className="review-form" onSubmit={submitReview}>
+        <h3>{detail.ownReview ? 'Atualize sua avaliação' : 'Conte como foi sua experiência'}</h3>
+        <label className="review-rating-label">Sua nota<span className="review-rating-picker">{[1, 2, 3, 4, 5].map((star) => <button type="button" key={star} className={star <= rating ? 'selected' : ''} onClick={() => setRating(star)} aria-label={`${star} ${star === 1 ? 'estrela' : 'estrelas'}`} aria-pressed={star === rating}>★</button>)}</span></label>
+        <label className="review-comment-label">Sua avaliação<textarea required minLength="10" maxLength="1200" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Compartilhe detalhes sobre a figure e sua experiência."/></label>
+        <div className="review-submit-row"><small>{comment.length}/1200</small><button className="add-button" disabled={submitting}>{submitting ? 'Salvando...' : detail.ownReview ? 'Atualizar avaliação' : 'Publicar avaliação'}</button></div>
+      </form> : user ? <p className="review-eligibility">As avaliações ficam disponíveis após a confirmação de uma compra desta figure.</p> : <p className="review-eligibility">Entre na sua conta para avaliar. As avaliações ficam disponíveis para clientes com compra confirmada.</p>}
+      {!user && <button type="button" className="switch-auth review-login" onClick={onLogin}>Entrar na minha conta</button>}
+      {detail.reviews.length ? <div className="review-list">{detail.reviews.map((review) => <article className="review-card" key={review.id}><div className="review-card-top"><div><b>{review.authorName}</b><RatingStars rating={review.rating}/></div><time dateTime={review.createdAt}>{new Date(review.createdAt).toLocaleDateString('pt-BR')}</time></div><p>{review.comment}</p></article>)}</div> : <p className="review-empty">Esta figure ainda não recebeu avaliações. Seja a primeira pessoa a compartilhar sua experiência após a compra.</p>}
+    </section>
+  </section>;
+}
+
 function App() {
   const [products, setProducts] = useState([]);
   const [user, setUser] = useState(null);
@@ -126,6 +204,10 @@ function App() {
   const [address, setAddress] = useState({ street: '', number: '', district: '', city: '', state: '', postalCode: '' });
   const [cepLookup, setCepLookup] = useState('idle');
   const [paymentMethod, setPaymentMethod] = useState('pix');
+  const [selectedProductId, setSelectedProductId] = useState(() => {
+    const match = window.location.pathname.match(/^\/produto\/([0-9a-f-]{36})\/?$/i);
+    return match?.[1] || null;
+  });
 
   const cartKey = user?.id || 'guest';
   const count = cart.reduce((sum, item) => sum + item.quantity, 0);
@@ -138,6 +220,30 @@ function App() {
   const featuredProducts = useMemo(() => products
     .filter((product) => product.featuredPosition && product.imageUrl)
     .sort((a, b) => a.featuredPosition - b.featuredPosition), [products]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const match = window.location.pathname.match(/^\/produto\/([0-9a-f-]{36})\/?$/i);
+      setSelectedProductId(match?.[1] || null);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  function openProduct(product) {
+    window.history.pushState({}, '', `/produto/${product.id}`);
+    setSelectedProductId(product.id);
+    setModal('');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function goHome(event) {
+    event?.preventDefault();
+    if (window.location.pathname !== '/' || window.location.search || window.location.hash) window.history.pushState({}, '', '/');
+    setSelectedProductId(null);
+    document.title = 'Aether Figures | Colecionáveis';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
 
   function notify(message, kind = 'success', action = null) {
     setNotice({ message, kind, action });
@@ -405,7 +511,7 @@ function App() {
   return <>
     <div className="announcement">Frete grátis em todas as figures · Parcele em até 12x</div>
     <header>
-      <a href="#top" className="header-brand">AETHER</a>
+      <a href="/" onClick={goHome} className="header-brand" aria-label="Aether Studio — página inicial">AETHER</a>
       <div className="header-actions">
         <label className="search"><Search size={16}/><input id="catalog-search" name="q" type="search" value={query} onChange={(event) => { setQuery(event.target.value); document.querySelector('#catalogo')?.scrollIntoView({ behavior: 'smooth' }); }} placeholder="Buscar figure" aria-label="Buscar figure"/></label>
         <button className="account-button" onClick={() => user ? openAccount() : openLogin()}><UserRound size={17}/><span>{user ? 'Minha conta' : 'Entrar'}</span></button>
@@ -416,6 +522,7 @@ function App() {
     {notice&&<div className={`notice ${notice.kind}`} role={notice.kind==='error'?'alert':'status'} aria-live={notice.kind==='error'?'assertive':'polite'}><span className="notice-message">{notice.message}</span>{notice.action&&<div className="notice-actions"><button type="button" className="notice-cancel" onClick={dismissNotice}>Cancelar</button><button type="button" className="notice-confirm" onClick={confirmNoticeAction}>{notice.action.label}</button></div>}<button type="button" className="notice-close" onClick={dismissNotice} aria-label="Fechar aviso"><X size={15}/></button></div>}
 
     {modal==='admin' ? <AdminPanel onClose={()=>setModal('')} onChanged={refreshProducts} notify={notify}/> : <main id="top">
+      {selectedProductId ? <ProductDetail productId={selectedProductId} user={user} onBack={goHome} onAddToCart={addToCart} onLogin={openLogin} notify={notify}/> : <>
       <section className={`hero ${featuredProducts.length ? 'hero-with-featured' : ''}`}>
         {featuredProducts.length > 0 && <div className="hero-featured-background" aria-hidden="true">
           {featuredProducts.map((product, index) => <div className="hero-slice" key={product.id} style={heroSliceLayout(index, featuredProducts.length)}><img src={product.imageUrl} alt=""/></div>)}
@@ -427,7 +534,7 @@ function App() {
       <section className="catalog" id="catalogo"><div className="catalog-heading"><h1>Catálogo de Figures</h1><p>Todos com frete grátis para o Brasil</p></div>
         <div className="category-list">{categories.map((category)=><button key={category} className={filter===category?'active':''} onClick={()=>setFilter(category)}>{category}</button>)}</div>
         {loading?<div className="catalog-state">Conectando ao catálogo...</div>:<div className="products">{visible.map((product,index)=><article className="product" key={product.id}>
-          <div className={`product-photo art-${index%6}`}>{product.imageUrl?<img className="figure-image" loading="lazy" src={product.imageUrl} alt={product.name}/>:<span className="sphere"/>}{product.compareAtCents>product.priceCents&&<span className="discount">{Math.round((1-product.priceCents/product.compareAtCents)*100)}% OFF</span>}{product.stock===0&&<span className="sold-out">ESGOTADO</span>}</div>
+          <button type="button" className={`product-photo product-open art-${index%6}`} onClick={()=>openProduct(product)} aria-label={`Ver detalhes de ${product.name}`}>{product.imageUrl?<img className="figure-image" loading="lazy" src={product.imageUrl} alt={product.name}/>:<span className="sphere"/>}{product.compareAtCents>product.priceCents&&<span className="discount">{Math.round((1-product.priceCents/product.compareAtCents)*100)}% OFF</span>}{product.stock===0&&<span className="sold-out">ESGOTADO</span>}</button>
           <h2>{product.name}</h2><p className="product-subtitle">Figure colecionável · {product.category}</p><div className="prices"><span>{money(product.priceCents)}</span>{product.compareAtCents>product.priceCents&&<del>{money(product.compareAtCents)}</del>}</div>
           <button className="add-button" disabled={!product.stock} onClick={()=>addToCart(product)}>{product.stock?'Adicionar ao carrinho':'Avise-me quando voltar'}</button>
         </article>)}</div>}
@@ -437,9 +544,10 @@ function App() {
       <section className="about"><div className="about-inner"><h2>Para quem leva a coleção a sério</h2><p>A Aether Studio reúne action figures e estátuas colecionáveis de anime, games, filmes e quadrinhos. Cada figure é escolhida pelo acabamento, pela pintura e pela fidelidade ao personagem, e chega em embalagem reforçada para proteger a sua coleção.</p><div className="perks"><div><b>Frete grátis</b><span>Em todos os figures, para todo o Brasil.</span></div><div><b>Faça sua encomenda</b><span>Não achou o personagem? Encomende e a gente procura para você.</span></div></div></div></section>
 
       <section className="newsletter"><h2>Receba os lançamentos<br/> primeiro</h2><p>{newsletterDone?'Cadastro realizado. Você receberá novidades da Aether.':'Cadastre seu e-mail e receba os próximos lançamentos em primeira mão.'}</p><form onSubmit={subscribe}><input id="newsletter-email" name="email" autoComplete="email" aria-label="Seu melhor e-mail" required type="email" placeholder="Seu melhor e-mail" value={newsletterEmail} onChange={(event)=>setNewsletterEmail(event.target.value)}/><button type="submit">Cadastrar</button></form></section>
+      </>}
     </main>}
 
-    {modal!=='admin'&&<footer><a href="#top" className="footer-brand">AETHER</a><p>© 2026 Aether Studio.</p><a href="https://instagram.com/aether.studio3d" target="_blank" rel="noreferrer"><Camera/> @aether.studio3d</a><a href="mailto:aetherstudio.figures@gmail.com"><Mail/> aetherstudio.figures@gmail.com</a></footer>}
+    {modal!=='admin'&&<footer><a href="/" onClick={goHome} className="footer-brand">AETHER</a><p>© 2026 Aether Studio.</p><a href="https://instagram.com/aether.studio3d" target="_blank" rel="noreferrer"><Camera/> @aether.studio3d</a><a href="mailto:aetherstudio.figures@gmail.com"><Mail/> aetherstudio.figures@gmail.com</a></footer>}
 
     {modal&&modal!=='admin'&&<div className="overlay" onClick={()=>setModal('')}>
       <section className={`dialog ${modal==='cart'||modal==='account'?'cart-dialog':''}`} onClick={(event)=>event.stopPropagation()} aria-modal="true" role="dialog">

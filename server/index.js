@@ -238,6 +238,101 @@ app.get('/api/products', async (_req, res) => {
   res.json(rows.map(productDto));
 });
 
+app.get('/api/products/:id', async (req, res) => {
+  const productId = z.string().uuid().safeParse(req.params.id);
+  if (!productId.success) return res.status(404).json({ error: 'Figure não encontrada.' });
+
+  const { rows: products } = await pool.query(
+    `SELECT p.*,
+            COALESCE(ROUND(AVG(r.rating)::numeric, 1), 0) AS average_rating,
+            COUNT(r.id)::integer AS review_count
+     FROM products p
+     LEFT JOIN product_reviews r ON r.product_id = p.id
+     WHERE p.id = $1 AND p.active = TRUE
+     GROUP BY p.id`,
+    [productId.data],
+  );
+  const product = products[0];
+  if (!product) return res.status(404).json({ error: 'Figure não encontrada.' });
+
+  const [{ rows: reviews }, { rows: ownReviews }, { rows: eligibility }] = await Promise.all([
+    pool.query(
+      `SELECT r.id, r.rating, r.comment, r.created_at, u.name AS author_name
+       FROM product_reviews r
+       JOIN users u ON u.id = r.user_id
+       WHERE r.product_id = $1
+       ORDER BY r.created_at DESC
+       LIMIT 100`,
+      [product.id],
+    ),
+    req.user
+      ? pool.query('SELECT id, rating, comment FROM product_reviews WHERE product_id=$1 AND user_id=$2', [product.id, req.user.id])
+      : Promise.resolve({ rows: [] }),
+    req.user
+      ? pool.query(
+        `SELECT EXISTS (
+           SELECT 1 FROM orders o
+           JOIN order_items oi ON oi.order_id = o.id
+           WHERE o.user_id = $1 AND oi.product_id = $2 AND o.status IN ('paid', 'paid_after_expiry')
+         ) AS eligible`,
+        [req.user.id, product.id],
+      )
+      : Promise.resolve({ rows: [{ eligible: false }] }),
+  ]);
+
+  res.json({
+    product: productDto(product),
+    averageRating: Number(product.average_rating),
+    reviewCount: Number(product.review_count),
+    reviews: reviews.map((review) => ({
+      id: review.id,
+      rating: Number(review.rating),
+      comment: review.comment,
+      createdAt: review.created_at,
+      authorName: review.author_name,
+    })),
+    canReview: Boolean(eligibility[0]?.eligible),
+    ownReview: ownReviews[0] ? {
+      id: ownReviews[0].id,
+      rating: Number(ownReviews[0].rating),
+      comment: ownReviews[0].comment,
+    } : null,
+  });
+});
+
+app.post('/api/products/:id/reviews', requireUser, async (req, res) => {
+  const productId = z.string().uuid().safeParse(req.params.id);
+  if (!productId.success) return res.status(404).json({ error: 'Figure não encontrada.' });
+  const reviewData = parse(z.object({
+    rating: z.number().int().min(1).max(5),
+    comment: z.string().trim().min(10, 'Escreva pelo menos 10 caracteres na avaliação.').max(1200),
+  }), req.body);
+
+  const { rows: eligible } = await pool.query(
+    `SELECT EXISTS (
+       SELECT 1 FROM products p
+       JOIN order_items oi ON oi.product_id = p.id
+       JOIN orders o ON o.id = oi.order_id
+       WHERE p.id = $1 AND p.active = TRUE AND o.user_id = $2
+         AND o.status IN ('paid', 'paid_after_expiry')
+     ) AS allowed`,
+    [productId.data, req.user.id],
+  );
+  if (!eligible[0]?.allowed) {
+    return res.status(403).json({ error: 'A avaliação fica disponível após a confirmação de uma compra desta figure.' });
+  }
+
+  const { rows } = await pool.query(
+    `INSERT INTO product_reviews (id, product_id, user_id, rating, comment)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (product_id, user_id)
+     DO UPDATE SET rating=EXCLUDED.rating, comment=EXCLUDED.comment, updated_at=NOW()
+     RETURNING id, rating, comment, created_at`,
+    [randomUUID(), productId.data, req.user.id, reviewData.rating, reviewData.comment],
+  );
+  res.json({ ...rows[0], rating: Number(rows[0].rating), authorName: req.user.name });
+});
+
 app.post('/api/admin/uploads', requireUser, requireAdmin, imageUpload.single('image'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Selecione uma imagem JPG, PNG ou WebP.' });
   const header = req.file.buffer.subarray(0, 12).toString('hex');
