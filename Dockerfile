@@ -11,6 +11,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY server ./server
+COPY public ./public
 COPY --from=build /app/dist ./dist
 RUN mkdir -p /app/uploads && chown -R node:node /app/uploads
 USER node
