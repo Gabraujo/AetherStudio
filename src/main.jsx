@@ -29,6 +29,7 @@ const fulfillmentLabel = {
   shipped: 'Enviado',
   delivered: 'Entregue',
 };
+const CheckoutPayment = React.lazy(() => import('./CheckoutPayment.jsx'));
 
 class AppErrorBoundary extends React.Component {
   state = { hasError: false, error: null };
@@ -190,6 +191,8 @@ function App() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [paymentsEnabled, setPaymentsEnabled] = useState(false);
+  const [mercadoPagoPublicKey, setMercadoPagoPublicKey] = useState('');
+  const [checkoutOrder, setCheckoutOrder] = useState(null);
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState(null);
@@ -203,7 +206,6 @@ function App() {
   const [newsletterDone, setNewsletterDone] = useState(false);
   const [address, setAddress] = useState({ street: '', number: '', district: '', city: '', state: '', postalCode: '' });
   const [cepLookup, setCepLookup] = useState('idle');
-  const [paymentMethod, setPaymentMethod] = useState('pix');
   const [selectedProductId, setSelectedProductId] = useState(() => {
     const match = window.location.pathname.match(/^\/produto\/([0-9a-f-]{36})\/?$/i);
     return match?.[1] || null;
@@ -276,6 +278,7 @@ function App() {
         setProducts(catalog);
         setUser(session.user);
         setPaymentsEnabled(config.paymentsEnabled);
+        setMercadoPagoPublicKey(config.mercadoPagoPublicKey || '');
         setEmailEnabled(config.emailEnabled);
         setLoading(false);
       })
@@ -294,6 +297,13 @@ function App() {
       setModal('reset');
     }
   }, []);
+
+  useEffect(() => {
+    if (loading || window.location.hash !== '#conta') return;
+    setModal(user ? 'account' : 'login');
+    setAuthMode('login');
+    window.history.replaceState({}, '', `${window.location.pathname}${window.location.search}`);
+  }, [loading, user?.id]);
 
   useEffect(() => {
     setCart(readCart(cartKey));
@@ -477,10 +487,10 @@ function App() {
         body: {
           items: cart.map((item) => ({ productId: item.id, quantity: item.quantity })),
           shippingAddress: address,
-          paymentMethod,
         },
       });
-      window.location.assign(result.checkoutUrl);
+      setCheckoutOrder({ ...result, totalLabel: money(result.totalCents) });
+      setBusy(false);
     } catch (error) {
       notify(error.message, 'error');
       setBusy(false);
@@ -505,6 +515,7 @@ function App() {
       setModal('login');
       return notify('Entre na sua conta para finalizar a compra.', 'error');
     }
+    setCheckoutOrder(null);
     setModal('checkout');
   };
 
@@ -550,7 +561,7 @@ function App() {
     {modal!=='admin'&&<footer><a href="/" onClick={goHome} className="footer-brand">AETHER</a><p>© 2026 Aether Studio.</p><a href="https://instagram.com/aether.studio3d" target="_blank" rel="noreferrer"><Camera/> @aether.studio3d</a><a href="mailto:aetherstudio.figures@gmail.com"><Mail/> aetherstudio.figures@gmail.com</a></footer>}
 
     {modal&&modal!=='admin'&&<div className="overlay" onClick={()=>setModal('')}>
-      <section className={`dialog ${modal==='cart'||modal==='account'?'cart-dialog':''}`} onClick={(event)=>event.stopPropagation()} aria-modal="true" role="dialog">
+      <section className={`dialog ${modal==='cart'||modal==='account'?'cart-dialog':''} ${modal==='checkout'?'checkout-dialog':''}`} onClick={(event)=>event.stopPropagation()} aria-modal="true" role="dialog">
         <button className="close" onClick={()=>setModal('')} aria-label="Fechar"><X/></button>
         {modal==='login'&&emailEnabled&&<button className="switch-auth forgot-link" onClick={()=>setModal('forgot')}>Esqueci minha senha</button>}
         {modal==='forgot'&&<><div className="eyebrow">RECUPERAÇÃO DE CONTA</div><h2>Redefina sua senha<span>.</span></h2><p>Informe o e-mail da conta. Se ele estiver cadastrado, enviaremos um link temporário.</p><form className="login-form" onSubmit={requestPasswordReset}><label>E-mail<input type="email" required autoComplete="email" value={email} onChange={(event)=>setEmail(event.target.value)} placeholder="voce@email.com"/></label><button className="add-button" disabled={busy}>{busy?'Enviando...':'Enviar link de recuperação'}</button></form><button className="switch-auth" onClick={()=>setModal('login')}>Voltar para entrar</button></>}
@@ -569,8 +580,25 @@ function App() {
 
         {modal==='account'&&<><div className="eyebrow">ÁREA DO CLIENTE</div><h2>Olá, {user?.name?.split(' ')[0]}<span>.</span></h2><p>{user?.email}</p>{user?.isAdmin&&<button className="add-button admin-open" onClick={()=>setModal('admin')}>Abrir painel de catálogo <ArrowRight size={16}/></button>}<div className="account-section"><div className="account-section-heading"><h3>Meus pedidos</h3><span>{orders.length}</span></div>{orders.length===0?<p className="empty-orders">Seus pedidos e atualizações de pagamento aparecerão aqui.</p>:orders.map((order)=><article className="order-card" key={order.id}><div className="order-title"><b>Pedido #{order.id.slice(0,8).toUpperCase()}</b><span className={`order-status ${order.status}`}>{statusLabel[order.status]||order.status}</span></div><small>{new Date(order.createdAt).toLocaleDateString('pt-BR')} · {money(order.totalCents)}</small><small className="payment-status-detail">Entrega: {fulfillmentLabel[order.fulfillmentStatus] || fulfillmentLabel.not_paid}{order.trackingCode && <> · Rastreio {order.trackingCode}</>}</small>{paymentStatusLabel[order.paymentStatus]&&<small className="payment-status-detail">{paymentStatusLabel[order.paymentStatus]}{order.refundedCents>0?` · Reembolsado: ${money(order.refundedCents)}`:''}</small>}<div className="order-lines">{order.items.map((item,index)=><span key={`${order.id}-${index}`}>{item.quantity}× {item.productName}</span>)}</div><small className="order-address">Entrega: {order.shippingAddress.street}, {order.shippingAddress.number} · {order.shippingAddress.city}/{order.shippingAddress.state} · CEP {order.shippingAddress.postalCode}</small></article>)}<form className="password-form" onSubmit={changePassword}><h3>Segurança da conta</h3><label>Senha atual<input type="password" required value={currentPassword} onChange={event=>setCurrentPassword(event.target.value)} autoComplete="current-password"/></label><label>Nova senha<input type="password" required minLength="10" value={newPassword} onChange={event=>setNewPassword(event.target.value)} autoComplete="new-password"/></label><button className="secondary" disabled={busy}>{busy?'Salvando...':'Alterar senha'}</button></form><button className="text-button logout" onClick={logout}>Sair da conta</button></div></>}
 
-        {modal==='checkout'&&<><div className="eyebrow">ENTREGA E PAGAMENTO</div><h2>Finalize seu pedido<span>.</span></h2><p>Confira o endereço e escolha uma forma de pagamento. A transação será concluída em ambiente seguro.</p><form className="login-form checkout-form" onSubmit={checkout}><label>CEP<input required inputMode="numeric" autoComplete="postal-code" maxLength="9" pattern="[0-9]{5}-?[0-9]{3}" value={address.postalCode} onChange={(event)=>{const digits=event.target.value.replace(/\D/g,'').slice(0,8);setAddress((current)=>({...current,postalCode:digits.length>5?`${digits.slice(0,5)}-${digits.slice(5)}`:digits}));}} placeholder="00000-000" aria-describedby="cep-status"/>{cepLookup==='idle'?<small id="cep-status" className="cep-status">Ao completar o CEP, consultamos o ViaCEP para preencher os dados disponíveis.</small>:<small id="cep-status" className={`cep-status ${cepLookup}`} role="status" aria-live="polite">{cepLookup==='loading'?'Consultando endereço pelo CEP...':cepLookup==='success'?'Endereço localizado. Confira os dados e informe o número.':cepLookup==='not-found'?'CEP não encontrado. Confira o número ou preencha o endereço manualmente.':'Não foi possível consultar o CEP agora. Você pode preencher o endereço manualmente.'}</small>}</label><label>Rua<input required autoComplete="address-line1" value={address.street} onChange={(event)=>setAddress((current)=>({...current,street:event.target.value}))} placeholder="Nome da rua"/></label><div className="checkout-row"><label>Número<input required autoComplete="address-line2" value={address.number} onChange={(event)=>setAddress((current)=>({...current,number:event.target.value}))}/></label><label>Bairro<input autoComplete="address-level3" value={address.district} onChange={(event)=>setAddress((current)=>({...current,district:event.target.value}))}/></label></div><label>Cidade<input required autoComplete="address-level2" value={address.city} onChange={(event)=>setAddress((current)=>({...current,city:event.target.value}))}/></label><label>Estado (UF)<input required minLength="2" maxLength="2" autoComplete="address-level1" value={address.state} onChange={(event)=>setAddress((current)=>({...current,state:event.target.value.toUpperCase()}))} placeholder="SP"/></label><fieldset className="payment-choice"><legend>Forma de pagamento</legend><label className={`payment-option ${paymentMethod==='pix'?'selected':''}`}><input type="radio" name="paymentMethod" value="pix" checked={paymentMethod==='pix'} onChange={()=>setPaymentMethod('pix')}/><span className="payment-mark pix-mark">PIX</span><span className="payment-copy"><b>Pix</b><small>Pix será sugerido na próxima etapa; você poderá confirmar ou escolher outra forma.</small></span></label><label className={`payment-option ${paymentMethod==='other'?'selected':''}`}><input type="radio" name="paymentMethod" value="other" checked={paymentMethod==='other'} onChange={()=>setPaymentMethod('other')}/><span className="payment-mark card-mark">•••</span><span className="payment-copy"><b>Outras opções</b><small>Escolha cartão e outros meios disponíveis na próxima etapa.</small></span></label><small className="checkout-note">A disponibilidade do Pix depende das opções habilitadas para esta compra.</small></fieldset><div className="cart-total"><span>Total · frete grátis</span><b>{money(total)}</b></div><button className="add-button" disabled={busy||!paymentsEnabled}>{busy?'Preparando pagamento...':'Continuar para pagamento'}</button>{!paymentsEnabled&&<small className="checkout-note">A finalização online estará disponível em breve.</small>}</form></>}
-      </section>
+        {modal==='checkout'&&<>
+          <div className="eyebrow">ENTREGA E PAGAMENTO</div><h2>Finalize seu pedido<span>.</span></h2>
+          {!checkoutOrder ? <>
+            <p>Confira o endereço de entrega. Você poderá pagar com cartão ou Pix nesta página.</p>
+            <form className="login-form checkout-form" onSubmit={checkout}>
+              <label>CEP<input required inputMode="numeric" autoComplete="postal-code" maxLength="9" pattern="[0-9]{5}-?[0-9]{3}" value={address.postalCode} onChange={(event)=>{const digits=event.target.value.replace(/\D/g,'').slice(0,8);setAddress((current)=>({...current,postalCode:digits.length>5?`${digits.slice(0,5)}-${digits.slice(5)}`:digits}));}} placeholder="00000-000" aria-describedby="cep-status"/>{cepLookup==='idle'?<small id="cep-status" className="cep-status">Ao completar o CEP, consultamos o ViaCEP para preencher os dados disponíveis.</small>:<small id="cep-status" className={`cep-status ${cepLookup}`} role="status" aria-live="polite">{cepLookup==='loading'?'Consultando endereço pelo CEP...':cepLookup==='success'?'Endereço localizado. Confira os dados e informe o número.':cepLookup==='not-found'?'CEP não encontrado. Confira o número ou preencha o endereço manualmente.':'Não foi possível consultar o CEP agora. Você pode preencher o endereço manualmente.'}</small>}</label>
+              <label>Rua<input required autoComplete="address-line1" value={address.street} onChange={(event)=>setAddress((current)=>({...current,street:event.target.value}))} placeholder="Nome da rua"/></label>
+              <div className="checkout-row"><label>Número<input required autoComplete="address-line2" value={address.number} onChange={(event)=>setAddress((current)=>({...current,number:event.target.value}))}/></label><label>Bairro<input autoComplete="address-level3" value={address.district} onChange={(event)=>setAddress((current)=>({...current,district:event.target.value}))}/></label></div>
+              <label>Cidade<input required autoComplete="address-level2" value={address.city} onChange={(event)=>setAddress((current)=>({...current,city:event.target.value}))}/></label>
+              <label>Estado (UF)<input required minLength="2" maxLength="2" autoComplete="address-level1" value={address.state} onChange={(event)=>setAddress((current)=>({...current,state:event.target.value.toUpperCase()}))} placeholder="SP"/></label>
+              <div className="cart-total"><span>Total · frete grátis</span><b>{money(total)}</b></div>
+              <button className="add-button" disabled={busy||!paymentsEnabled}>{busy?'Preparando pedido...':'Continuar para pagamento'}</button>
+              {!paymentsEnabled&&<small className="checkout-note">A finalização online estará disponível após configurar as credenciais do Mercado Pago.</small>}
+            </form>
+          </> : <>
+            <React.Suspense fallback={<p className="payment-feedback" role="status">Carregando pagamento seguro…</p>}><CheckoutPayment order={checkoutOrder} publicKey={mercadoPagoPublicKey} email={user?.email} onPaid={()=>{setCart([]);api('/api/orders').then(setOrders).catch((error)=>notify(error.message,'error'));}} /></React.Suspense>
+            <button type="button" className="text-button" onClick={()=>setCheckoutOrder(null)}>Voltar ao endereço</button>
+          </>}
+        </>}      </section>
     </div>}
   </>;
 }

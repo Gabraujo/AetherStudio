@@ -43,25 +43,26 @@ Não envie `.env`, credenciais do Mercado Pago, senhas de administrador ou token
 
 ## Pagamentos
 
-O checkout usa Mercado Pago Checkout Pro, com pagamento processado fora do site pela página segura do provedor. Cadastre no ambiente do servidor:
+O checkout usa os componentes seguros do Mercado Pago dentro da loja: o cliente pode gerar Pix com QR Code e código copia e cola ou preencher o cartão sem sair do site. Os campos do cartão são renderizados pelo Card Payment Brick do Mercado Pago e tokenizados no navegador; a Aether recebe somente o token e não armazena número nem CVV. O checkout não salva cartões para compras futuras.
 
 - `MP_ACCESS_TOKEN`: Access Token da aplicação Mercado Pago. O token permanece exclusivamente no backend.
+- `MP_PUBLIC_KEY`: Public Key da mesma aplicação e do mesmo ambiente (teste ou produção). Ela é usada pelo Brick no navegador e pode ser exposta ao cliente.
 - `MP_WEBHOOK_SECRET`: chave secreta de Webhooks da aplicação.
-- `APP_URL`: URL pública completa da loja, por exemplo `https://seudominio.com.br`.
+- `APP_URL`: origem pública HTTPS da loja, por exemplo `https://seudominio.com.br`.
 
-Enquanto esses valores não estiverem definidos, o checkout informa que está indisponível e não cria pedidos falsos. O cliente é redirecionado ao ambiente do Mercado Pago. A loja só marca o pedido pago depois de validar a assinatura do webhook e consultar o pagamento no próprio Mercado Pago. Pedidos reservam o estoque por 30 minutos; uma rotina devolve o estoque quando a reserva expira.
-
-No checkout, o cliente pode iniciar com Pix selecionado ou abrir as outras opções disponíveis. O Mercado Pago continua oferecendo a seleção final no ambiente seguro dele. Para que Pix apareça, habilite-o na conta recebedora e cadastre uma chave Pix; a disponibilidade também depende da conta e das configurações do provedor. A integração Checkout Pro permite configurar meios disponíveis na preferência e usa `pix` como identificador do Pix.
+Cadastre os valores no serviço da loja no Coolify. No painel do Mercado Pago, abra as credenciais da aplicação AetherStudio e copie a Public Key e o Access Token do mesmo ambiente. Não confunda a Public Key com o Client Secret. Salve e faça redeploy no Coolify. Pix e cartão dependem das permissões e da habilitação desses meios na conta recebedora.
 
 Configure a notificação **payment** no painel Mercado Pago para `https://seudominio.com.br/api/payments/webhook`. Durante o desenvolvimento, use credenciais de teste e uma URL pública de túnel para testar webhooks; troque para as credenciais de produção quando publicar.
 
-No Compose do Coolify, `MP_EXPECT_LIVE` assume `true`; assim, o servidor ignora pagamentos de teste em produção. Para um ambiente separado de homologação com credenciais de teste, defina `MP_EXPECT_LIVE=false`. Nunca use essa opção na loja que recebe pedidos reais. Em produção, `SESSION_SECRET` deve ter pelo menos 64 bytes; `openssl rand -hex 48` gera um valor adequado. Um erro ao criar checkout deixa a reserva de estoque expirar naturalmente em 30 minutos para evitar liberar itens se o provedor tiver aceitado a solicitação apesar de um timeout.
+No Compose do Coolify, `MP_EXPECT_LIVE` assume `true`; assim, o servidor ignora pagamentos de teste em produção. Para um ambiente separado de homologação com credenciais de teste, defina `MP_EXPECT_LIVE=false`. Nunca use essa opção na loja que recebe pedidos reais. Em produção, `SESSION_SECRET` deve ter pelo menos 64 bytes; `openssl rand -hex 48` gera um valor adequado. Pedidos reservam o estoque por 30 minutos e o QR Pix expira junto com a reserva.
 
 ### Homologação de pagamentos
 
 Faça a primeira compra em uma implantação de homologação separada, com banco e credenciais de teste próprios; não troque a loja pública para `MP_EXPECT_LIVE=false`. Crie uma conta de vendedor e uma conta de comprador de teste no Mercado Pago, configure o webhook para a URL pública HTTPS de homologação e use o segredo correspondente à aplicação de teste. A documentação do Mercado Pago explica como criar [contas de teste](https://www.mercadopago.com.br/developers/pt/docs/checkout-pro-preferences/test-accounts) e configurar/simular [notificações de pagamento](https://www.mercadopago.com.br/developers/pt/docs/checkout-pro-preferences/payment-notifications). Para validar compras de teste, use a ferramenta **Simular** no painel de Webhooks quando aplicável; não presuma que cada pagamento de teste enviará automaticamente a mesma notificação que uma transação de produção.
 
 ## E-mails transacionais
+
+Os e-mails automáticos incluem a logo oficial Aether como imagem embutida.
 
 O servidor pode enviar recuperação de senha, confirmação de pedido, mudanças de pagamento e atualizações de envio usando a API do Resend. Configure `RESEND_API_KEY` e `EMAIL_FROM` no ambiente; use como remetente um endereço de um domínio verificado no Resend. Antes de enviar para clientes, publique os registros SPF e DKIM fornecidos pelo provedor e configure DMARC no DNS. Não use o endereço Gmail de administração como remetente do domínio.
 

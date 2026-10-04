@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24.0.0" },
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
     "dev": "concurrently -k -n api,web \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "node --watch server/index.js",
@@ -14,6 +16,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@mercadopago/sdk-react": "^1.0.7",
     "bcryptjs": "^3.0.2",
     "connect-pg-simple": "^10.0.0",
     "dotenv": "^16.6.1",
@@ -22,8 +25,8 @@
     "express-session": "^1.18.2",
     "helmet": "^8.1.0",
     "lucide-react": "1.48.0",
-    "pg": "^8.16.3",
     "multer": "^2.0.2",
+    "pg": "^8.16.3",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "zod": "^4.1.12"

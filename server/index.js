@@ -13,7 +13,7 @@ import helmet from 'helmet';
 import multer from 'multer';
 import { z } from 'zod';
 import { inTransaction, migrate, pool } from './db.js';
-import { createCheckoutPreference, getPayment, verifyWebhookSignature } from './mercado-pago.js';
+import { createDirectPayment, getPayment, verifyWebhookSignature } from './mercado-pago.js';
 import { derivePaymentState } from './payment-state.js';
 import { bootstrapAdmin, loadSessionUser, normalizeEmail, publicUser, requireAdmin, requireUser } from './security.js';
 import { emailEnabled, enqueueEmail, sendTransactionalEmail, startEmailWorker } from './email.js';
@@ -64,8 +64,9 @@ app.use(helmet({
       imgSrc: ["'self'", 'data:', 'https:'],
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
-      scriptSrc: ["'self'"],
-      connectSrc: ["'self'", 'https://viacep.com.br'],
+      scriptSrc: ["'self'", 'https://sdk.mercadopago.com', 'https://www.mercadopago.com', 'https://*.mercadopago.com', 'https://*.mercadopago.com.br'],
+      connectSrc: ["'self'", 'https://viacep.com.br', 'https://api.mercadopago.com', 'https://www.mercadopago.com', 'https://*.mercadopago.com', 'https://*.mercadopago.com.br'],
+      frameSrc: ["'self'", 'https://*.mercadopago.com', 'https://*.mercadopago.com.br'],
       formAction: ["'self'", 'https://www.mercadopago.com.br'],
     },
   },
@@ -152,7 +153,29 @@ const shippingSchema = z.object({
 const checkoutSchema = z.object({
   items: z.array(z.object({ productId: z.string().uuid(), quantity: z.number().int().min(1).max(10) })).min(1).max(20),
   shippingAddress: shippingSchema,
-  paymentMethod: z.enum(['pix', 'other']).default('other'),
+});
+const paymentAttemptSchema = z.object({
+  idempotencyKey: z.string().uuid(),
+  paymentMethod: z.enum(['pix', 'card']),
+  deviceId: z.string().trim().min(1).max(512).optional(),
+  formData: z.object({
+    token: z.string().trim().min(1).max(512),
+    payment_method_id: z.string().trim().regex(/^[a-zA-Z0-9_-]{1,40}$/).refine((value) => value.toLowerCase() !== 'pix'),
+    installments: z.number().int().min(1).max(24),
+    issuer_id: z.union([z.string().regex(/^\d{1,20}$/), z.number().int().positive()]).optional(),
+    payer: z.object({
+      identification: z.object({ type: z.enum(['CPF', 'CNPJ']), number: z.string().regex(/^\d{11}$|^\d{14}$/) }),
+    }),
+  }).optional(),
+}).superRefine((data, context) => {
+  if (data.paymentMethod === 'card' && !data.formData) context.addIssue({ code: 'custom', path: ['formData'], message: 'Dados do cartão incompletos.' });
+  if (data.paymentMethod === 'pix' && data.formData) context.addIssue({ code: 'custom', path: ['formData'], message: 'Dados de cartão não são aceitos para Pix.' });
+  if (data.formData && data.formData.payer.identification.type === 'CPF' && data.formData.payer.identification.number.length !== 11) {
+    context.addIssue({ code: 'custom', path: ['formData', 'payer', 'identification', 'number'], message: 'CPF inválido.' });
+  }
+  if (data.formData && data.formData.payer.identification.type === 'CNPJ' && data.formData.payer.identification.number.length !== 14) {
+    context.addIssue({ code: 'custom', path: ['formData', 'payer', 'identification', 'number'], message: 'CNPJ inválido.' });
+  }
 });
 const imageUpload = multer({
   storage: multer.memoryStorage(),
@@ -219,7 +242,8 @@ app.get('/api/health', async (_req, res) => {
 
 app.get('/api/config', (_req, res) => {
   res.json({
-    paymentsEnabled: Boolean(process.env.MP_ACCESS_TOKEN && process.env.MP_WEBHOOK_SECRET && process.env.APP_URL),
+    paymentsEnabled: Boolean(process.env.MP_ACCESS_TOKEN && process.env.MP_WEBHOOK_SECRET && process.env.MP_PUBLIC_KEY && process.env.APP_URL),
+    mercadoPagoPublicKey: process.env.MP_PUBLIC_KEY || null,
     emailEnabled: emailEnabled(),
   });
 });
@@ -508,8 +532,57 @@ async function expireReservations() {
   );
 }
 
+const paymentStatusLabels = {
+  approved: 'Pagamento aprovado', authorized: 'Pagamento autorizado', in_process: 'Pagamento em análise',
+  in_mediation: 'Pagamento em contestação', rejected: 'Pagamento recusado', cancelled: 'Pagamento cancelado',
+  refunded: 'Pagamento reembolsado', partially_refunded: 'Pagamento parcialmente reembolsado',
+  charged_back: 'Pagamento contestado (chargeback)', unknown: 'Status de pagamento desconhecido',
+};
+
+async function applyMercadoPagoPayment(client, order, payment) {
+  if (!order || Number(order.total_cents) !== Math.round(Number(payment.transaction_amount) * 100)) return false;
+  const paymentState = derivePaymentState(payment, Number(order.total_cents));
+  if (!paymentState) throw new Error('Mercado Pago returned an invalid refunded amount.');
+  const paymentId = String(payment.id);
+  if (order.payment_id && order.payment_id !== paymentId && !['rejected', 'cancelled'].includes(order.payment_status)) {
+    console.error(`[aether] Multiple payments reference order ${order.id}; review payment ${paymentId}.`);
+    return false;
+  }
+  let nextOrderStatus = order.status;
+  if (['approved', 'partially_refunded'].includes(paymentState.paymentStatus)) {
+    if (order.status === 'pending_payment') nextOrderStatus = 'paid';
+    else if (order.status === 'expired' || order.status === 'checkout_error') nextOrderStatus = 'paid_after_expiry';
+  }
+  await client.query(
+    `UPDATE orders SET status=$2,payment_status=$3,
+       fulfillment_status=CASE WHEN $3='approved' AND fulfillment_status='not_paid' THEN 'processing' ELSE fulfillment_status END,
+       payment_id=$4,
+       payment_attempt_key=CASE WHEN $3 IN ('rejected','cancelled') THEN NULL ELSE payment_attempt_key END,
+       payment_attempt_method=CASE WHEN $3 IN ('rejected','cancelled') THEN NULL ELSE payment_attempt_method END,
+       refunded_cents=GREATEST(refunded_cents,$5),updated_at=NOW() WHERE id=$1`,
+    [order.id, nextOrderStatus, paymentState.paymentStatus, paymentId, paymentState.refundedCents],
+  );
+  if (order.payment_status !== paymentState.paymentStatus || order.status !== nextOrderStatus) {
+    const { rows: [customer] } = await client.query('SELECT email,name FROM users WHERE id=$1', [order.user_id]);
+    if (customer) await enqueueEmail(client, {
+      eventKey: `payment-update:${paymentId}:${paymentState.paymentStatus}:${paymentState.refundedCents}`,
+      recipient: customer.email, template: 'payment-update',
+      payload: { name: customer.name, orderId: order.id, totalCents: order.total_cents,
+        refundedCents: paymentState.refundedCents, statusLabel: paymentStatusLabels[paymentState.paymentStatus] || paymentStatusLabels.unknown },
+    });
+  }
+  return true;
+}
+
+function directPaymentDto(payment) {
+  const data = payment.point_of_interaction?.transaction_data;
+  return { paymentId: String(payment.id), status: payment.status, statusDetail: payment.status_detail || null,
+    qrCode: data?.qr_code || null, qrCodeBase64: data?.qr_code_base64 || null,
+    ticketUrl: data?.ticket_url || null, expirationDate: payment.date_of_expiration || null };
+}
+
 app.post('/api/orders', requireUser, checkoutLimiter, async (req, res) => {
-  if (!process.env.MP_ACCESS_TOKEN || !process.env.MP_WEBHOOK_SECRET || !process.env.APP_URL) {
+  if (!process.env.MP_ACCESS_TOKEN || !process.env.MP_WEBHOOK_SECRET || !process.env.MP_PUBLIC_KEY || !process.env.APP_URL) {
     return res.status(503).json({ error: 'A finalização online está temporariamente indisponível. Tente novamente mais tarde.' });
   }
   const data = parse(checkoutSchema, req.body);
@@ -519,9 +592,8 @@ app.post('/api/orders', requireUser, checkoutLimiter, async (req, res) => {
   if (lines.some((item) => item.quantity > 10)) return res.status(400).json({ error: 'Limite de 10 unidades por figure.' });
 
   const orderId = randomUUID();
-  let created;
   try {
-    created = await inTransaction(async (client) => {
+    const created = await inTransaction(async (client) => {
       const ids = lines.map((item) => item.productId);
       const { rows: products } = await client.query(
         'SELECT * FROM products WHERE id = ANY($1::uuid[]) AND active = TRUE ORDER BY id FOR UPDATE',
@@ -565,6 +637,10 @@ app.post('/api/orders', requireUser, checkoutLimiter, async (req, res) => {
           [randomUUID(), orderId, product.id, product.name, quantity, product.price_cents],
         );
       }
+      await enqueueEmail(client, {
+        eventKey: `order-created:${orderId}`, recipient: req.user.email, template: 'order-created',
+        payload: { name: req.user.name, orderId, totalCents, accountUrl: `${process.env.APP_URL}/#conta` },
+      });
       return { order: { id: orderId, total_cents: totalCents, reservation_expires_at: insertedOrder.reservation_expires_at }, items: orderItems.map(({ product, quantity }) => ({
         product_id: product.id,
         product_name: product.name,
@@ -572,39 +648,74 @@ app.post('/api/orders', requireUser, checkoutLimiter, async (req, res) => {
         unit_price_cents: Number(product.price_cents),
       })) };
     });
+    return res.status(201).json({ orderId: created.order.id, totalCents: created.order.total_cents, expiresAt: created.order.reservation_expires_at });
   } catch (error) {
     throw error;
   }
 
+});
+
+app.post('/api/orders/:id/payment', requireUser, checkoutLimiter, async (req, res) => {
+  if (!process.env.MP_ACCESS_TOKEN || !process.env.MP_WEBHOOK_SECRET || !process.env.MP_PUBLIC_KEY || !process.env.APP_URL) {
+    return res.status(503).json({ error: 'O pagamento está temporariamente indisponível.' });
+  }
+  if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return res.sendStatus(404);
+  const attempt = parse(paymentAttemptSchema, req.body);
+  const order = await inTransaction(async (client) => {
+    const { rows: [row] } = await client.query('SELECT * FROM orders WHERE id=$1 AND user_id=$2 FOR UPDATE', [req.params.id, req.user.id]);
+    if (!row) return null;
+    if (row.status !== 'pending_payment' || new Date(row.reservation_expires_at).getTime() <= Date.now()) {
+      const error = new Error('Este pedido não está mais disponível para pagamento.'); error.status = 409; throw error;
+    }
+    const retry = row.payment_attempt_key === attempt.idempotencyKey;
+    if (row.payment_attempt_key && !retry) { const error = new Error('Já existe uma tentativa de pagamento em andamento.'); error.status = 409; throw error; }
+    if (row.payment_id && !['rejected', 'cancelled'].includes(row.payment_status) && !retry) {
+      const error = new Error('Este pedido já possui um pagamento em processamento.'); error.status = 409; throw error;
+    }
+    if (retry && row.payment_attempt_method !== attempt.paymentMethod) {
+      const error = new Error('Use o mesmo meio de pagamento para retomar esta tentativa.'); error.status = 409; throw error;
+    }
+    if (!retry) await client.query('UPDATE orders SET payment_attempt_key=$2,payment_attempt_method=$3,updated_at=NOW() WHERE id=$1', [row.id, attempt.idempotencyKey, attempt.paymentMethod]);
+    return row;
+  });
+  if (!order) return res.sendStatus(404);
+  const paymentPayload = attempt.paymentMethod === 'pix'
+    ? { paymentMethod: 'pix', expirationAt: new Date(order.reservation_expires_at).toISOString(), deviceId: attempt.deviceId }
+    : { paymentMethod: 'card', token: attempt.formData.token, paymentMethodId: attempt.formData.payment_method_id,
+      installments: attempt.formData.installments, issuerId: attempt.formData.issuer_id,
+      identification: attempt.formData.payer.identification, deviceId: attempt.deviceId };
+  let payment;
   try {
-    const preference = await createCheckoutPreference({
-      order: created.order,
-      items: created.items,
-      buyer: req.user,
-      shippingAddress: data.shippingAddress,
-      paymentMethod: data.paymentMethod,
-    });
-    await inTransaction(async (client) => {
-      await client.query('UPDATE orders SET payment_preference_id = $2, updated_at = NOW() WHERE id = $1', [orderId, preference.id]);
-      await enqueueEmail(client, {
-        eventKey: `order-created:${orderId}`,
-        recipient: req.user.email,
-        template: 'order-created',
-        payload: {
-          name: req.user.name,
-          orderId,
-          totalCents: created.order.total_cents,
-          checkoutUrl: preference.url,
-        },
-      });
-    });
-    return res.status(201).json({ orderId, checkoutUrl: preference.url });
+    if (order.payment_id && order.payment_attempt_key === attempt.idempotencyKey) payment = await getPayment(order.payment_id);
+    else {
+      const result = await createDirectPayment({ orderId: order.id, totalCents: Number(order.total_cents), buyer: req.user,
+        payment: paymentPayload, notificationUrl: `${new URL(process.env.APP_URL).origin}/api/payments/webhook`, idempotencyKey: attempt.idempotencyKey });
+      payment = await getPayment(result.id);
+    }
   } catch (error) {
-    // A timeout or network error can happen after Mercado Pago accepted the
-    // preference. Keep the stock reserved until expiry to avoid overselling.
-    console.error(`[aether] Checkout preference could not be confirmed for order ${orderId}.`);
+    if (error.status === 422) await pool.query('UPDATE orders SET payment_attempt_key=NULL,payment_attempt_method=NULL WHERE id=$1 AND payment_attempt_key=$2', [order.id, attempt.idempotencyKey]);
     throw error;
   }
+  const expectedLiveMode = process.env.MP_EXPECT_LIVE === undefined ? isProduction : process.env.MP_EXPECT_LIVE === 'true';
+  if (payment.external_reference !== order.id || payment.currency_id !== 'BRL'
+    || Math.round(Number(payment.transaction_amount) * 100) !== Number(order.total_cents) || payment.live_mode !== expectedLiveMode) {
+    console.error(`[aether] Mercado Pago payment did not match order ${order.id}.`);
+    return res.status(502).json({ error: 'Não foi possível validar o pagamento agora.' });
+  }
+  await inTransaction(async (client) => {
+    const { rows: [current] } = await client.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE', [order.id]);
+    await applyMercadoPagoPayment(client, current, payment);
+  });
+  const result = directPaymentDto(payment);
+  if (['rejected', 'cancelled'].includes(payment.status)) return res.status(422).json({ ...result, error: 'Pagamento recusado. Confira os dados ou tente outro meio de pagamento.' });
+  res.status(201).json(result);
+});
+
+app.get('/api/orders/:id/payment', requireUser, async (req, res) => {
+  if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return res.sendStatus(404);
+  const { rows: [order] } = await pool.query('SELECT payment_id FROM orders WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+  if (!order?.payment_id) return res.sendStatus(404);
+  res.json(directPaymentDto(await getPayment(order.payment_id)));
 });
 
 app.post('/api/payments/webhook', async (req, res) => {
@@ -639,7 +750,7 @@ app.post('/api/payments/webhook', async (req, res) => {
       if (!paymentState) throw new Error('Mercado Pago returned an invalid refunded amount.');
 
       const paymentId = String(payment.id);
-      if (order.payment_id && order.payment_id !== paymentId) {
+      if (order.payment_id && order.payment_id !== paymentId && !['rejected', 'cancelled'].includes(order.payment_status)) {
         console.error(`[aether] Multiple approved payments reference order ${orderId}; review payment ${paymentId}.`);
         return;
       }
@@ -658,6 +769,8 @@ app.post('/api/payments/webhook', async (req, res) => {
              payment_status = $3,
              fulfillment_status = CASE WHEN $3='approved' AND fulfillment_status='not_paid' THEN 'processing' ELSE fulfillment_status END,
              payment_id = CASE WHEN $4 THEN $5 ELSE payment_id END,
+             payment_attempt_key = CASE WHEN $3 IN ('rejected', 'cancelled') THEN NULL ELSE payment_attempt_key END,
+             payment_attempt_method = CASE WHEN $3 IN ('rejected', 'cancelled') THEN NULL ELSE payment_attempt_method END,
              refunded_cents = GREATEST(refunded_cents, $6),
              updated_at = NOW()
          WHERE id = $1`,

@@ -1,4 +1,14 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 const RESEND_API_URL = 'https://api.resend.com/emails';
+const logoPath = fileURLToPath(new URL('../public/icons/aether-192.png', import.meta.url));
+const logoAttachment = {
+  filename: 'aether-logo.png',
+  content: readFileSync(logoPath).toString('base64'),
+  content_id: 'aether-logo',
+  content_type: 'image/png',
+};
 
 export const emailEnabled = () => Boolean(process.env.RESEND_API_KEY && process.env.EMAIL_FROM);
 
@@ -12,8 +22,7 @@ const brl = (cents) => (Number(cents) / 100).toLocaleString('pt-BR', { style: 'c
 
 function emailLayout(title, body) {
   const safeTitle = escapeHtml(title);
-  const html = `<!doctype html><html lang="pt-BR"><body style="margin:0;background:#0b0a09;color:#e7dfd3;font-family:Arial,sans-serif"><div style="max-width:600px;margin:32px auto;padding:32px 24px;background:#171311;border:1px solid #302a24"><p style="color:#d6bc98;letter-spacing:6px">A E T H E R</p><h1 style="font-family:Georgia,serif;font-weight:400;color:#ead9c4">${safeTitle}</h1>${body}<p style="margin-top:32px;color:#948d85;font-size:13px">Aether Studio · <a style="color:#d6bc98" href="${escapeHtml(process.env.APP_URL || '')}">aetherstudio3d.com</a></p></div></body></html>`;
-  return html;
+  return `<!doctype html><html lang="pt-BR"><body style="margin:0;background:#0b0a09;color:#e7dfd3;font-family:Arial,sans-serif"><div style="max-width:600px;margin:32px auto;padding:32px 24px;background:#171311;border:1px solid #302a24"><p style="margin:0 0 24px"><img src="cid:aether-logo" width="72" height="72" alt="Aether" style="display:block;width:72px;height:72px;object-fit:contain"></p><h1 style="font-family:Georgia,serif;font-weight:400;color:#ead9c4">${safeTitle}</h1>${body}<p style="margin-top:32px;color:#948d85;font-size:13px">Aether Studio · <a style="color:#d6bc98" href="${escapeHtml(process.env.APP_URL || '')}">aetherstudio3d.com</a></p></div></body></html>`;
 }
 
 function renderEmail(template, payload) {
@@ -31,11 +40,11 @@ function renderEmail(template, payload) {
   }
 
   if (template === 'order-created') {
-    const url = escapeHtml(payload.checkoutUrl);
+    const url = escapeHtml(payload.accountUrl || `${process.env.APP_URL}/#conta`);
     return {
       subject: `Pedido ${orderId} recebido · Aether Studio`,
-      text: `Olá, ${payload.name}. Recebemos seu pedido ${orderId}, no total de ${total}. Ele aguarda o pagamento. Continue no Mercado Pago: ${payload.checkoutUrl}`,
-      html: emailLayout('Pedido recebido', `<p>Olá, ${name}. Seu pedido <strong>#${orderId}</strong> foi criado e aguarda o pagamento.</p><p>Total: <strong>${total}</strong></p><p><a href="${url}" style="display:inline-block;padding:14px 20px;background:#d6bc98;color:#17120e;text-decoration:none">Continuar para pagamento</a></p>`),
+      text: `Olá, ${payload.name}. Recebemos seu pedido ${orderId}, no total de ${total}. Ele aguarda o pagamento. Acesse sua conta para continuar: ${payload.accountUrl}`,
+      html: emailLayout('Pedido recebido', `<p>Olá, ${name}. Seu pedido <strong>#${orderId}</strong> foi criado e aguarda o pagamento.</p><p>Total: <strong>${total}</strong></p><p><a href="${url}" style="display:inline-block;padding:14px 20px;background:#d6bc98;color:#17120e;text-decoration:none">Acompanhar pedido</a></p>`),
     };
   }
 
@@ -72,7 +81,7 @@ export async function sendTransactionalEmail({ recipient, template, payload, ide
       'Content-Type': 'application/json',
       'Idempotency-Key': idempotencyKey,
     },
-    body: JSON.stringify({ from: process.env.EMAIL_FROM, to: [recipient], ...message }),
+    body: JSON.stringify({ from: process.env.EMAIL_FROM, to: [recipient], attachments: [logoAttachment], ...message }),
     signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) throw new Error(`Resend returned HTTP ${response.status}.`);

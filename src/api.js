@@ -14,6 +14,10 @@ export async function api(path, options = {}) {
 
   if (response.status === 204) return null;
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || `A solicitação falhou (${response.status}).`);
+  if (!response.ok) {
+    const error = new Error(payload.error || `A solicitação falhou (${response.status}).`);
+    error.status = response.status;
+    throw error;
+  }
   return payload;
 }
