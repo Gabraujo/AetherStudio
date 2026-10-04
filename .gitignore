@@ -7,6 +7,9 @@
 node_modules/
 dist/
 coverage/
+android/.gradle/
+android/local.properties
+android/**/build/
 
 # Local data and logs
 *.log
