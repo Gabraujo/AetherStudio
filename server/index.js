@@ -850,7 +850,7 @@ app.post('/api/admin/products', requireUser, requireAdmin, async (req, res) => {
   const id = randomUUID();
   const { rows } = await pool.query(
     `INSERT INTO products (id, name, category, description, price_cents, compare_at_cents, stock, image_url, active)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text, $9::boolean) RETURNING *`,
     [id, data.name, data.category, data.description, data.priceCents, data.compareAtCents, data.stock, data.imageUrl, data.active],
   );
   res.status(201).json(productDto(rows[0]));
@@ -863,8 +863,8 @@ app.put('/api/admin/products/:id', requireUser, requireAdmin, async (req, res) =
   }
   const { rows } = await pool.query(
     `UPDATE products SET name=$2, category=$3, description=$4, price_cents=$5,
-       compare_at_cents=$6, stock=$7, image_url=$8, active=$9,
-       featured_position=CASE WHEN $9=TRUE AND $8 IS NOT NULL THEN featured_position ELSE NULL END,
+       compare_at_cents=$6, stock=$7, image_url=$8::text, active=$9::boolean,
+       featured_position=CASE WHEN $9::boolean=TRUE AND $8::text IS NOT NULL THEN featured_position ELSE NULL END,
        updated_at=NOW()
      WHERE id=$1 RETURNING *`,
     [req.params.id, data.name, data.category, data.description, data.priceCents, data.compareAtCents, data.stock, data.imageUrl, data.active],
@@ -971,7 +971,7 @@ app.use((error, _req, res, _next) => {
     return res.status(400).json({ error: message });
   }
   if (error.status && error.status < 500) return res.status(error.status).json({ error: error.message });
-  console.error('[aether] Request failed:', error.message);
+  console.error(`[aether] Request failed (${_req.method} ${_req.path}):`, error.message);
   res.status(500).json({ error: 'Não foi possível concluir a solicitação agora.' });
 });
 
