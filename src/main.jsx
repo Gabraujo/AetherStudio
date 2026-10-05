@@ -191,7 +191,6 @@ function App() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [paymentsEnabled, setPaymentsEnabled] = useState(false);
-  const [missingPaymentVariables, setMissingPaymentVariables] = useState([]);
   const [mercadoPagoPublicKey, setMercadoPagoPublicKey] = useState('');
   const [checkoutOrder, setCheckoutOrder] = useState(null);
   const [emailEnabled, setEmailEnabled] = useState(false);
@@ -279,7 +278,6 @@ function App() {
         setProducts(catalog);
         setUser(session.user);
         setPaymentsEnabled(config.paymentsEnabled);
-        setMissingPaymentVariables(config.missingPaymentVariables || []);
         setMercadoPagoPublicKey(config.mercadoPagoPublicKey || '');
         setEmailEnabled(config.emailEnabled);
         setLoading(false);
@@ -541,7 +539,7 @@ function App() {
           {featuredProducts.map((product, index) => <div className="hero-slice" key={product.id} style={heroSliceLayout(index, featuredProducts.length)}><img src={product.imageUrl} alt=""/></div>)}
           {featuredProducts.slice(0, -1).map((product, index) => <span className="hero-divider" key={`divider-${product.id}`} style={heroDividerLayout(index + 1, featuredProducts.length)}/>)}
         </div>}
-        <div className="hero-inner"><div className="hero-logo" aria-label="Aether Studio"><span>Aether</span><i/><small>STUDIO</small></div><p>Action figures colecionáveis com<br className="desktop-break"/> acabamento de galeria, para quem coleciona<br className="desktop-break"/> pelos detalhes.</p><a className="outline-button" href="#catalogo">Ver figures</a></div>
+        <div className="hero-inner"><div className="hero-logo" aria-label="Aether Studio"><span>Aether</span><i/><small>STUDIO</small></div><p>Action figures | Colecionáveis</p><a className="outline-button" href="#catalogo">Ver figures</a></div>
       </section>
 
       <section className="catalog" id="catalogo"><div className="catalog-heading"><h1>Catálogo de Figures</h1><p>Todos com frete grátis para o Brasil</p></div>
@@ -594,7 +592,7 @@ function App() {
               <label>Estado (UF)<input required minLength="2" maxLength="2" autoComplete="address-level1" value={address.state} onChange={(event)=>setAddress((current)=>({...current,state:event.target.value.toUpperCase()}))} placeholder="SP"/></label>
               <div className="cart-total"><span>Total · frete grátis</span><b>{money(total)}</b></div>
               <button className="add-button" disabled={busy||!paymentsEnabled}>{busy?'Preparando pedido...':'Continuar para pagamento'}</button>
-              {!paymentsEnabled&&<small className="checkout-note">Pagamentos desativados. No Coolify, configure: {missingPaymentVariables.length ? missingPaymentVariables.join(', ') : 'credenciais do Mercado Pago'}. Depois faça o redeploy.</small>}
+              {!paymentsEnabled&&<small className="checkout-note">A finalização online estará disponível em breve.</small>}
             </form>
           </> : <>
             <React.Suspense fallback={<p className="payment-feedback" role="status">Carregando pagamento seguro…</p>}><CheckoutPayment order={checkoutOrder} publicKey={mercadoPagoPublicKey} email={user?.email} onPaid={()=>{setCart([]);api('/api/orders').then(setOrders).catch((error)=>notify(error.message,'error'));}} /></React.Suspense>

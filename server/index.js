@@ -245,7 +245,6 @@ app.get('/api/config', (_req, res) => {
   const missingPaymentVariables = requiredPaymentVariables.filter((name) => !process.env[name]?.trim());
   res.json({
     paymentsEnabled: missingPaymentVariables.length === 0,
-    missingPaymentVariables,
     mercadoPagoPublicKey: process.env.MP_PUBLIC_KEY || null,
     emailEnabled: emailEnabled(),
   });
