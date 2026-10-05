@@ -71,6 +71,10 @@ export default function CheckoutPayment({ order, publicKey, email, onPaid }) {
   }
 
   async function submitCard(formData) {
+    if (!formData?.payer?.identification?.type || !formData?.payer?.identification?.number) {
+      setMessage('Confira o CPF ou CNPJ informado no formul\u00e1rio do cart\u00e3o.');
+      return;
+    }
     await submit('card', {
       token: formData.token,
       payment_method_id: formData.payment_method_id,
@@ -110,7 +114,7 @@ export default function CheckoutPayment({ order, publicKey, email, onPaid }) {
         locale="pt-BR"
         customization={{ paymentMethods: { maxInstallments: 12 } }}
         onSubmit={submitCard}
-        onError={() => setMessage('Não foi possível carregar o formulário de cartão. Atualize a página e tente novamente.')}
+        onError={(error) => { console.error('[aether] Mercado Pago CardPayment Brick error:', error); setMessage('N\u00e3o foi poss\u00edvel carregar o formul\u00e1rio de cart\u00e3o. Atualize a p\u00e1gina e tente novamente.'); }}
       /> : <p className="payment-feedback">Carregando formulário seguro…</p>}
     </div>}
     {message && <p className="payment-feedback" role="status">{message}</p>}

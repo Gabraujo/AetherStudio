@@ -899,61 +899,89 @@ app.get('/api/admin/orders', requireUser, requireAdmin, async (_req, res) => {
   res.json(rows.map((order) => ({
     ...orderDto(order, grouped.get(order.id) || []),
     customer: { name: order.customer_name, email: order.customer_email },
+    hasPayment: Boolean(order.payment_id),
+    hasPaymentAttempt: Boolean(order.payment_attempt_key),
   })));
 });
 
 app.put('/api/admin/orders/:id/fulfillment', requireUser, requireAdmin, async (req, res) => {
   const data = parse(z.object({
-    status: z.enum(['shipped', 'delivered']),
+    status: z.enum(['processing', 'shipped', 'delivered']),
     trackingCode: z.string().trim().max(100).optional().default(''),
   }), req.body);
   const updated = await inTransaction(async (client) => {
     const { rows: [order] } = await client.query(
       `SELECT o.*, u.email AS customer_email, u.name AS customer_name
-       FROM orders o JOIN users u ON u.id=o.user_id WHERE o.id=$1 FOR UPDATE OF o`,
+       FROM orders o JOIN users u ON o.user_id=u.id WHERE o.id=$1 FOR UPDATE OF o`,
       [req.params.id],
     );
-    if (!order) {
-      const error = new Error('Pedido não encontrado.');
-      error.status = 404;
-      throw error;
-    }
+    if (!order) { const error = new Error('Order not found.'); error.status = 404; throw error; }
     if (order.status !== 'paid' || order.payment_status !== 'approved') {
-      const error = new Error('Só é possível atualizar a entrega de pedidos pagos e sem contestação ou reembolso.');
-      error.status = 409;
-      throw error;
+      const error = new Error('Only paid orders can have their fulfillment stage changed.'); error.status = 409; throw error;
     }
-    const expectedCurrent = data.status === 'shipped' ? 'processing' : 'shipped';
     if (order.fulfillment_status === data.status) return order;
-    if (order.fulfillment_status !== expectedCurrent) {
-      const error = new Error('Atualize o pedido na sequência: em separação, enviado e entregue.');
-      error.status = 409;
-      throw error;
-    }
-    if (data.status === 'shipped' && !data.trackingCode) {
-      const error = new Error('Informe o código de rastreio antes de marcar o pedido como enviado.');
-      error.status = 400;
-      throw error;
+    if (data.status === 'shipped' && !data.trackingCode && !order.tracking_code) {
+      const error = new Error('A tracking code is required before marking an order as shipped.'); error.status = 400; throw error;
     }
     const { rows: [saved] } = await client.query(
       "UPDATE orders SET fulfillment_status=$2, tracking_code=COALESCE(NULLIF($3, ''), tracking_code), updated_at=NOW() WHERE id=$1 RETURNING *",
       [order.id, data.status, data.trackingCode || null],
     );
-    const statusLabel = data.status === 'shipped' ? 'Pedido enviado' : 'Pedido entregue';
+    const statusLabel = { processing: 'Pedido em separa\u00e7\u00e3o', shipped: 'Pedido enviado', delivered: 'Pedido entregue' }[data.status];
     await enqueueEmail(client, {
-      eventKey: `fulfillment-update:${order.id}:${data.status}`,
+      eventKey: `fulfillment-update:${order.id}:${randomUUID()}`,
       recipient: order.customer_email,
       template: 'fulfillment-update',
-      payload: {
-        name: order.customer_name,
-        orderId: order.id,
-        statusLabel,
-        trackingCode: saved.tracking_code,
-      },
+      payload: { name: order.customer_name, orderId: order.id, statusLabel, trackingCode: saved.tracking_code },
     });
     return saved;
   });
   res.json({ fulfillmentStatus: updated.fulfillment_status, trackingCode: updated.tracking_code || null });
+});
+
+app.post('/api/admin/orders/:id/cancel', requireUser, requireAdmin, async (req, res) => {
+  const cancelled = await inTransaction(async (client) => {
+    const { rows: [order] } = await client.query(
+      `SELECT o.*, u.email AS customer_email, u.name AS customer_name
+       FROM orders o JOIN users u ON o.user_id=u.id WHERE o.id=$1 FOR UPDATE OF o`,
+      [req.params.id],
+    );
+    if (!order) { const error = new Error('Order not found.'); error.status = 404; throw error; }
+    if (order.status === 'cancelled') return order;
+    if (!['pending_payment', 'expired', 'checkout_error'].includes(order.status) || order.payment_id || order.payment_attempt_key || order.payment_status !== 'pending') {
+      const error = new Error('Only unpaid orders without a payment attempt can be cancelled.'); error.status = 409; throw error;
+    }
+    if (order.status === 'pending_payment') {
+      await client.query(
+        `UPDATE products p SET stock=p.stock+reserved.quantity, updated_at=NOW()
+         FROM (SELECT product_id,SUM(quantity)::INTEGER AS quantity FROM order_items WHERE order_id=$1 AND product_id IS NOT NULL GROUP BY product_id) reserved
+         WHERE p.id=reserved.product_id`,
+        [order.id],
+      );
+    }
+    const { rows: [saved] } = await client.query("UPDATE orders SET status='cancelled', updated_at=NOW() WHERE id=$1 RETURNING *", [order.id]);
+    await enqueueEmail(client, {
+      eventKey: `order-cancelled:${order.id}`, recipient: order.customer_email, template: 'order-cancelled',
+      payload: { name: order.customer_name, orderId: order.id, totalCents: Number(order.total_cents) },
+    });
+    return saved;
+  });
+  res.json({ status: cancelled.status });
+});
+
+app.delete('/api/admin/orders/:id', requireUser, requireAdmin, async (req, res) => {
+  const deleted = await inTransaction(async (client) => {
+    const { rows: [order] } = await client.query('SELECT status,payment_id,payment_attempt_key FROM orders WHERE id=$1 FOR UPDATE', [req.params.id]);
+    if (!order) return false;
+    if (!['cancelled', 'expired', 'checkout_error'].includes(order.status) || order.payment_id || order.payment_attempt_key) {
+      const error = new Error('Only closed orders without a payment can be deleted.');
+      error.status = 409; throw error;
+    }
+    await client.query('DELETE FROM orders WHERE id=$1', [req.params.id]);
+    return true;
+  });
+  if (!deleted) return res.sendStatus(404);
+  res.sendStatus(204);
 });
 
 app.use('/uploads', express.static(uploadsDir, { maxAge: isProduction ? '30d' : 0, immutable: isProduction }));

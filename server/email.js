@@ -48,6 +48,14 @@ function renderEmail(template, payload) {
     };
   }
 
+  if (template === 'order-cancelled') {
+    return {
+      subject: `Pedido ${orderId} cancelado - Aether Studio`,
+      text: `Ol\u00e1, ${payload.name}. O pedido ${orderId} foi cancelado. Se precisar de ajuda, entre em contato conosco.`,
+      html: emailLayout('Pedido cancelado', `<p>Ol\u00e1, ${name}. O pedido <strong>#${orderId}</strong> foi cancelado.</p><p>Se precisar de ajuda, entre em contato conosco.</p>`),
+    };
+  }
+
   if (template === 'payment-update') {
     const status = escapeHtml(payload.statusLabel);
     const refunded = payload.refundedCents > 0 ? `<p>Valor reembolsado: <strong>${brl(payload.refundedCents)}</strong></p>` : '';

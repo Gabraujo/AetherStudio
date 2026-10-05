@@ -13,6 +13,7 @@ const statusLabel = {
   paid_after_expiry: 'Pagamento aprovado · confirme a entrega',
   expired: 'Pedido expirado',
   checkout_error: 'Pagamento não iniciado',
+  cancelled: 'Pedido cancelado',
 };
 const paymentStatusLabel = {
   rejected: 'Tentativa recusada. Você pode fazer um novo pedido.',

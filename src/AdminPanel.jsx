@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Archive, ArrowLeft, ImagePlus, PackageCheck, Pencil, Plus, RotateCcw, Save, ShoppingBag, Star, X } from 'lucide-react';
+import { Archive, ArrowLeft, Ban, ImagePlus, PackageCheck, Pencil, Plus, RotateCcw, Save, ShoppingBag, Star, Trash2, X } from 'lucide-react';
 import { api } from './api.js';
 
 const emptyForm = {
@@ -14,6 +14,7 @@ const orderStatuses = {
   paid_after_expiry: 'Pago após a reserva expirar',
   expired: 'Reserva expirada',
   checkout_error: 'Pagamento não iniciado',
+  cancelled: 'Pedido cancelado',
 };
 const paymentStatuses = {
   pending: 'Pagamento pendente',
@@ -48,6 +49,7 @@ export default function AdminPanel({ onClose, onChanged, notify }) {
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [featuredSaving, setFeaturedSaving] = useState(false);
   const [trackingCodes, setTrackingCodes] = useState({});
+  const [fulfillmentSelections, setFulfillmentSelections] = useState({});
   const [updatingOrderId, setUpdatingOrderId] = useState(null);
 
   async function refresh() {
@@ -112,20 +114,52 @@ export default function AdminPanel({ onClose, onChanged, notify }) {
     }
   }
 
-  async function updateFulfillment(order, status) {
+  async function updateFulfillment(order) {
+    const status = fulfillmentSelections[order.id] || order.fulfillmentStatus;
     setUpdatingOrderId(order.id);
     try {
       await api(`/api/admin/orders/${order.id}/fulfillment`, {
         method: 'PUT',
         body: { status, trackingCode: trackingCodes[order.id]?.trim() || '' },
       });
-      notify(status === 'shipped' ? 'Pedido enviado. O cliente receberá um e-mail com o rastreio.' : 'Pedido marcado como entregue. O cliente receberá uma atualização por e-mail.');
+      notify('Etapa do pedido atualizada. Uma notifica\u00e7\u00e3o foi enviada ao cliente por e-mail, se o servi\u00e7o estiver configurado.');
       await refreshOrders();
     } catch (error) {
       notify(error.message, 'error');
     } finally {
       setUpdatingOrderId(null);
     }
+  }
+
+
+  function cancelOrder(order) {
+    notify('Cancelar pedido #' + order.id.slice(0, 8).toUpperCase() + '?', 'confirm', {
+      label: 'Cancelar pedido',
+      onConfirm: async () => {
+        setUpdatingOrderId(order.id);
+        try {
+          await api('/api/admin/orders/' + order.id + '/cancel', { method: 'POST' });
+          notify('Pedido cancelado. O cliente receber\u00e1 uma notifica\u00e7\u00e3o por e-mail, se configurado.');
+          await refreshOrders();
+        } catch (error) { notify(error.message, 'error'); }
+        finally { setUpdatingOrderId(null); }
+      },
+    });
+  }
+
+  function deleteOrder(order) {
+    notify('Excluir permanentemente o pedido #' + order.id.slice(0, 8).toUpperCase() + '?', 'confirm', {
+      label: 'Excluir pedido',
+      onConfirm: async () => {
+        setUpdatingOrderId(order.id);
+        try {
+          await api('/api/admin/orders/' + order.id, { method: 'DELETE' });
+          notify('Pedido exclu\u00eddo.');
+          await refreshOrders();
+        } catch (error) { notify(error.message, 'error'); }
+        finally { setUpdatingOrderId(null); }
+      },
+    });
   }
 
   useEffect(() => {
@@ -320,10 +354,13 @@ export default function AdminPanel({ onClose, onChanged, notify }) {
         <div className="admin-order-top"><div><small>#{order.id.slice(0, 8).toUpperCase()} · {new Date(order.createdAt).toLocaleString('pt-BR')}</small><h3>{order.customer.name}</h3><a href={`mailto:${order.customer.email}`}>{order.customer.email}</a></div><div className="admin-order-total"><span className={`order-status ${order.status}`}>{orderStatuses[order.status] || order.status}</span><b>{money(order.totalCents)}</b><small className="payment-status-detail">{paymentStatuses[order.paymentStatus] || paymentStatuses.unknown}{order.refundedCents>0?` · Reembolsado ${money(order.refundedCents)}`:''}</small></div></div>
         <div className="admin-order-items">{order.items.map((item, index) => <span key={`${order.id}-${index}`}>{item.quantity}× {item.productName}<b>{money(item.unitPriceCents * item.quantity)}</b></span>)}</div>
         <div className="admin-order-address"><small>Endereço de entrega</small><span>{order.shippingAddress.street}, {order.shippingAddress.number}{order.shippingAddress.district ? ` · ${order.shippingAddress.district}` : ''} · {order.shippingAddress.city}/{order.shippingAddress.state} · CEP {order.shippingAddress.postalCode}</span></div>
-      {order.status === 'paid' && order.paymentStatus === 'approved' && order.fulfillmentStatus !== 'delivered' && <div className="fulfillment-control">
-        <span>Entrega: {fulfillmentStatuses[order.fulfillmentStatus] || fulfillmentStatuses.not_paid}</span>
-        {order.fulfillmentStatus === 'processing' ? <><input aria-label="Código de rastreio" placeholder="Código de rastreio" value={trackingCodes[order.id] || ''} onChange={(event) => setTrackingCodes({ ...trackingCodes, [order.id]: event.target.value })}/><button className="secondary" disabled={updatingOrderId === order.id} onClick={() => updateFulfillment(order, 'shipped')}>Marcar enviado</button></> : <button className="secondary" disabled={updatingOrderId === order.id} onClick={() => updateFulfillment(order, 'delivered')}>Marcar entregue</button>}
+      {order.status === 'paid' && order.paymentStatus === 'approved' && <div className="fulfillment-control">
+        <label>Etapa do pedido<select value={fulfillmentSelections[order.id] || order.fulfillmentStatus} onChange={(event) => setFulfillmentSelections({ ...fulfillmentSelections, [order.id]: event.target.value })}>{Object.entries(fulfillmentStatuses).filter(([status]) => status !== 'not_paid').map(([status, label]) => <option key={status} value={status}>{label}</option>)}</select></label>
+        {(fulfillmentSelections[order.id] || order.fulfillmentStatus) === 'shipped' && <input aria-label="Codigo de rastreio" placeholder="Codigo de rastreio" value={trackingCodes[order.id] ?? order.trackingCode ?? ''} onChange={(event) => setTrackingCodes({ ...trackingCodes, [order.id]: event.target.value })}/>}
+        <button className="secondary" disabled={updatingOrderId === order.id || (fulfillmentSelections[order.id] || order.fulfillmentStatus) === order.fulfillmentStatus} onClick={() => updateFulfillment(order)}>Salvar etapa</button>
       </div>}
+      {order.status !== 'paid' && !order.hasPayment && !order.hasPaymentAttempt && order.status !== 'cancelled' && <div className="fulfillment-control"><button className="secondary" disabled={updatingOrderId === order.id} onClick={() => cancelOrder(order)}><Ban size={14}/> Cancelar pedido</button></div>}
+      {['cancelled', 'expired', 'checkout_error'].includes(order.status) && !order.hasPayment && !order.hasPaymentAttempt && <div className="fulfillment-control"><button className="secondary danger" disabled={updatingOrderId === order.id} onClick={() => deleteOrder(order)}><Trash2 size={14}/> Excluir pedido</button></div>}
       </article>)}
       {!ordersLoading && orders.length >= 200 && <p className="admin-empty">Exibindo os 200 pedidos mais recentes.</p>}
     </section>}

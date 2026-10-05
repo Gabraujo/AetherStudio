@@ -152,7 +152,14 @@ export async function createDirectPayment({ orderId, totalCents, buyer, payment,
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result.id || !result.status) {
-    console.error(`[aether] Mercado Pago direct payment rejected (${response.status}).`);
+    const safeProviderDetails = {
+      message: typeof result.message === 'string' ? result.message.slice(0, 200) : undefined,
+      cause: Array.isArray(result.cause) ? result.cause.slice(0, 5).map((item) => ({
+        code: typeof item.code === 'string' ? item.code.slice(0, 80) : undefined,
+        description: typeof item.description === 'string' ? item.description.slice(0, 200) : undefined,
+      })) : undefined,
+    };
+    console.error(`[aether] Mercado Pago direct payment rejected (${response.status}): ${JSON.stringify(safeProviderDetails)}`);
     const error = new Error('Não foi possível confirmar o pagamento. Confira os dados e tente novamente.');
     error.status = response.status >= 400 && response.status < 500 ? 422 : 502;
     throw error;
