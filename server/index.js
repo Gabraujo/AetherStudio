@@ -241,8 +241,11 @@ app.get('/api/health', async (_req, res) => {
 });
 
 app.get('/api/config', (_req, res) => {
+  const requiredPaymentVariables = ['MP_ACCESS_TOKEN', 'MP_PUBLIC_KEY', 'MP_WEBHOOK_SECRET', 'APP_URL'];
+  const missingPaymentVariables = requiredPaymentVariables.filter((name) => !process.env[name]?.trim());
   res.json({
-    paymentsEnabled: Boolean(process.env.MP_ACCESS_TOKEN && process.env.MP_WEBHOOK_SECRET && process.env.MP_PUBLIC_KEY && process.env.APP_URL),
+    paymentsEnabled: missingPaymentVariables.length === 0,
+    missingPaymentVariables,
     mercadoPagoPublicKey: process.env.MP_PUBLIC_KEY || null,
     emailEnabled: emailEnabled(),
   });
