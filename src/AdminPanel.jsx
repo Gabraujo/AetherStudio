@@ -43,6 +43,7 @@ export default function AdminPanel({ onClose, onChanged, notify }) {
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
   const [section, setSection] = useState('products');
+  const [orderFilter, setOrderFilter] = useState('active');
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -172,6 +173,12 @@ export default function AdminPanel({ onClose, onChanged, notify }) {
     .map((product) => product.id);
   const featuredChanged = featuredIds.length !== savedFeaturedIds.length
     || featuredIds.some((id, index) => id !== savedFeaturedIds[index]);
+  const isClosedOrder = (order) => ['cancelled', 'expired', 'checkout_error'].includes(order.status)
+    || order.fulfillmentStatus === 'delivered'
+    || ['refunded', 'charged_back'].includes(order.paymentStatus);
+  const activeOrders = orders.filter((order) => !isClosedOrder(order));
+  const closedOrders = orders.filter(isClosedOrder);
+  const visibleOrders = orderFilter === 'active' ? activeOrders : closedOrders;
 
   function edit(product) {
     setEditingId(product.id);
@@ -253,6 +260,20 @@ export default function AdminPanel({ onClose, onChanged, notify }) {
     });
   }
 
+  function destroyProduct(product) {
+    notify('Excluir permanentemente ' + product.name + '? O historico do pedido sera preservado.', 'confirm', {
+      label: 'Excluir permanentemente',
+      onConfirm: async () => {
+        try {
+          await api('/api/admin/products/' + product.id + '/permanent', { method: 'DELETE' });
+          notify('Figure excluida permanentemente.');
+          await refresh();
+          onChanged();
+        } catch (error) { notify(error.message, 'error'); }
+      },
+    });
+  }
+
   async function restore(product) {
     try {
       await api(`/api/admin/products/${product.id}`, {
@@ -322,7 +343,7 @@ export default function AdminPanel({ onClose, onChanged, notify }) {
       {loading ? <p className="admin-empty">Carregando catálogo...</p> : products.length === 0 ? <p className="admin-empty">Nenhuma figure cadastrada.</p> : <div className="admin-list">{products.map((product) => <article className={`admin-product ${product.active ? '' : 'archived'}`} key={product.id}>
         <div className={`admin-thumb ${product.category.toLowerCase()}`}>{product.imageUrl ? <img src={product.imageUrl} alt=""/> : <span className="sphere"/>}</div>
         <div className="admin-product-copy"><small>{product.category} · {product.active ? 'ATIVA' : 'FORA DO CATÁLOGO'}</small><b>{product.name}</b><span>{money(product.priceCents)} · {product.stock} em estoque</span></div>
-        <div className="admin-product-actions"><button className="icon-button" onClick={() => edit(product)} aria-label={`Editar ${product.name}`}><Pencil size={16}/></button>{product.active ? <button className="icon-button danger" onClick={() => archive(product)} aria-label={`Remover ${product.name}`}><Archive size={16}/></button> : <button className="icon-button" onClick={() => restore(product)} aria-label={`Restaurar ${product.name}`}><RotateCcw size={16}/></button>}</div>
+        <div className="admin-product-actions"><button className="icon-button" onClick={() => edit(product)} aria-label={`Editar ${product.name}`}><Pencil size={16}/></button>{product.active ? <button className="icon-button danger" onClick={() => archive(product)} aria-label={`Remover ${product.name} do catalogo`}><Archive size={16}/></button> : <button className="icon-button" onClick={() => restore(product)} aria-label={`Restaurar ${product.name}`}><RotateCcw size={16}/></button>}<button className="icon-button danger" onClick={() => destroyProduct(product)} aria-label={`Excluir permanentemente ${product.name}`} title="Excluir permanentemente"><Trash2 size={16}/></button></div>
       </article>)}</div>}
     </>}
 
@@ -349,8 +370,12 @@ export default function AdminPanel({ onClose, onChanged, notify }) {
     </section>}
 
     {section === 'orders' && <section className="admin-orders">
-      <div className="admin-list-heading"><h2>Pedidos recentes</h2><button className="secondary" onClick={refreshOrders} disabled={ordersLoading}>{ordersLoading ? 'Atualizando...' : 'Atualizar pedidos'}</button></div>
-      {ordersLoading && orders.length === 0 ? <p className="admin-empty">Carregando pedidos...</p> : orders.length === 0 ? <p className="admin-empty">Nenhum pedido foi registrado ainda.</p> : orders.map((order) => <article className="admin-order" key={order.id}>
+      <div className="admin-list-heading"><h2>Pedidos</h2><button className="secondary" onClick={refreshOrders} disabled={ordersLoading}>{ordersLoading ? 'Atualizando...' : 'Atualizar pedidos'}</button></div>
+      <nav className="admin-order-filters" aria-label="Filtrar pedidos">
+        <button type="button" className={orderFilter === 'active' ? 'active' : ''} onClick={() => setOrderFilter('active')}>Ativos e em andamento <span>{activeOrders.length}</span></button>
+        <button type="button" className={orderFilter === 'closed' ? 'active' : ''} onClick={() => setOrderFilter('closed')}>Cancelados e concluidos <span>{closedOrders.length}</span></button>
+      </nav>
+      {ordersLoading && orders.length === 0 ? <p className="admin-empty">Carregando pedidos...</p> : orders.length === 0 ? <p className="admin-empty">Nenhum pedido foi registrado ainda.</p> : visibleOrders.length === 0 ? <p className="admin-empty">Nenhum pedido nesta lista.</p> : visibleOrders.map((order) => <article className="admin-order" key={order.id}>
         <div className="admin-order-top"><div><small>#{order.id.slice(0, 8).toUpperCase()} · {new Date(order.createdAt).toLocaleString('pt-BR')}</small><h3>{order.customer.name}</h3><a href={`mailto:${order.customer.email}`}>{order.customer.email}</a></div><div className="admin-order-total"><span className={`order-status ${order.status}`}>{orderStatuses[order.status] || order.status}</span><b>{money(order.totalCents)}</b><small className="payment-status-detail">{paymentStatuses[order.paymentStatus] || paymentStatuses.unknown}{order.refundedCents>0?` · Reembolsado ${money(order.refundedCents)}`:''}</small></div></div>
         <div className="admin-order-items">{order.items.map((item, index) => <span key={`${order.id}-${index}`}>{item.quantity}× {item.productName}<b>{money(item.unitPriceCents * item.quantity)}</b></span>)}</div>
         <div className="admin-order-address"><small>Endereço de entrega</small><span>{order.shippingAddress.street}, {order.shippingAddress.number}{order.shippingAddress.district ? ` · ${order.shippingAddress.district}` : ''} · {order.shippingAddress.city}/{order.shippingAddress.state} · CEP {order.shippingAddress.postalCode}</span></div>

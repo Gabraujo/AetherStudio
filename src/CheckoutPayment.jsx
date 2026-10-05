@@ -11,6 +11,7 @@ const statusText = {
 
 export default function CheckoutPayment({ order, publicKey, email, onPaid }) {
   const [sdkReady, setSdkReady] = useState(false);
+  const [cardBrickReady, setCardBrickReady] = useState(false);
   const [method, setMethod] = useState('pix');
   const [pix, setPix] = useState(null);
   const [message, setMessage] = useState('');
@@ -96,8 +97,8 @@ export default function CheckoutPayment({ order, publicKey, email, onPaid }) {
   return <section className="checkout-payment" aria-live="polite">
     <p>Pedido <strong>#{order.orderId.slice(0, 8).toUpperCase()}</strong> · total <strong>{order.totalLabel}</strong></p>
     <div className="payment-tabs" role="tablist" aria-label="Forma de pagamento">
-      <button type="button" role="tab" aria-selected={method === 'pix'} className={method === 'pix' ? 'active' : ''} onClick={() => setMethod('pix')}>Pix</button>
-      <button type="button" role="tab" aria-selected={method === 'card'} className={method === 'card' ? 'active' : ''} onClick={() => setMethod('card')}>Cartão</button>
+      <button type="button" role="tab" aria-selected={method === 'pix'} className={method === 'pix' ? 'active' : ''} onClick={() => { setMethod('pix'); setCardBrickReady(false); }}>Pix</button>
+      <button type="button" role="tab" aria-selected={method === 'card'} className={method === 'card' ? 'active' : ''} onClick={() => { setMethod('card'); setCardBrickReady(false); }}>Cartão</button>
     </div>
     {method === 'pix' && <div className="pix-payment">
       {!pix ? <><p>Gere seu QR Code ou código Pix. A reserva do pedido dura 30 minutos.</p><button type="button" className="add-button" disabled={busy} onClick={generatePix}>{busy ? 'Gerando Pix…' : 'Gerar Pix'}</button></> : <>
@@ -109,13 +110,17 @@ export default function CheckoutPayment({ order, publicKey, email, onPaid }) {
     </div>}
     {method === 'card' && <div className="card-payment">
       <p>Os dados do cartão são inseridos em campos seguros do Mercado Pago e não ficam armazenados na Aether.</p>
-      {sdkReady ? <CardPayment
+      {sdkReady ? <>
+        {!cardBrickReady && <p className="payment-feedback" role="status">Carregando os campos seguros do cartao...</p>}
+        <CardPayment
         initialization={{ amount: order.totalCents / 100, payer: { email } }}
         locale="pt-BR"
         customization={{ paymentMethods: { maxInstallments: 12 } }}
         onSubmit={submitCard}
+        onReady={() => { setCardBrickReady(true); setMessage(''); }}
         onError={(error) => { console.error('[aether] Mercado Pago CardPayment Brick error:', error); setMessage('N\u00e3o foi poss\u00edvel carregar o formul\u00e1rio de cart\u00e3o. Atualize a p\u00e1gina e tente novamente.'); }}
-      /> : <p className="payment-feedback">Carregando formulário seguro…</p>}
+      />
+      </>: <p className="payment-feedback">Carregando formulário seguro…</p>}
     </div>}
     {message && <p className="payment-feedback" role="status">{message}</p>}
   </section>;

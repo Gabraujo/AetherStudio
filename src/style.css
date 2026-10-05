@@ -188,3 +188,6 @@ img{max-width:100%}
 @media(max-width:480px){.checkout-dialog{padding:66px 16px 24px!important}.checkout-payment{margin-top:12px}.pix-qr{width:min(200px,100%)}}
 
 .fulfillment-control label{display:grid;gap:5px;color:#c8b99f;font-size:11px}.fulfillment-control select{min-width:180px;padding:10px 12px;border:1px solid #37302a;background:#0b0a09;color:#eee7dd;font:inherit;font-size:11px;color-scheme:dark}.fulfillment-control .secondary{display:inline-flex;align-items:center;gap:6px}
+
+.admin-order-filters{display:flex;gap:8px;margin:0 0 20px;border-bottom:1px solid var(--line)}.admin-order-filters button{display:flex;align-items:center;gap:9px;padding:11px 14px;margin-bottom:-1px;border:0;border-bottom:1px solid transparent;background:transparent;color:#a39a8e;font:inherit;font-size:11px;cursor:pointer}.admin-order-filters button.active{border-color:var(--gold);color:var(--gold)}.admin-order-filters button span{min-width:19px;padding:3px 5px;border-radius:20px;background:#211c17;color:#d8c5aa;text-align:center;font-size:9px}
+@media(max-width:600px){.admin-order-filters{gap:0}.admin-order-filters button{flex:1;justify-content:center;padding:11px 7px;font-size:10px}}

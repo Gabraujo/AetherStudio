@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import bcrypt from 'bcryptjs';
@@ -878,6 +878,26 @@ app.put('/api/admin/products/:id', requireUser, requireAdmin, async (req, res) =
 app.delete('/api/admin/products/:id', requireUser, requireAdmin, async (req, res) => {
   const { rowCount } = await pool.query('UPDATE products SET active=FALSE, featured_position=NULL, updated_at=NOW() WHERE id=$1 AND active=TRUE', [req.params.id]);
   if (!rowCount) return res.status(404).json({ error: 'Figure não encontrada no catálogo.' });
+  res.sendStatus(204);
+});
+
+app.delete('/api/admin/products/:id/permanent', requireUser, requireAdmin, async (req, res) => {
+  const removed = await inTransaction(async (client) => {
+    const { rows: [product] } = await client.query('SELECT image_url FROM products WHERE id=$1 FOR UPDATE', [req.params.id]);
+    if (!product) return null;
+    await client.query('DELETE FROM products WHERE id=$1', [req.params.id]);
+    if (!product.image_url || !/^\/uploads\/[\w-]+\.(jpg|png|webp)$/i.test(product.image_url)) return null;
+    const { rows: [otherReference] } = await client.query('SELECT 1 FROM products WHERE image_url=$1 LIMIT 1', [product.image_url]);
+    return otherReference ? null : path.basename(product.image_url);
+  });
+  if (removed === null) {
+    const { rowCount } = await pool.query('SELECT 1 FROM products WHERE id=$1', [req.params.id]);
+    if (rowCount) return res.status(404).json({ error: 'Figure nao encontrada.' });
+  }
+  if (removed) {
+    try { await unlink(path.join(uploadsDir, removed)); }
+    catch (error) { if (error.code !== 'ENOENT') console.error('[aether] Could not remove unreferenced product image.'); }
+  }
   res.sendStatus(204);
 });
 
