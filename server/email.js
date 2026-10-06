@@ -42,7 +42,7 @@ function renderEmail(template, payload) {
   if (template === 'order-created') {
     const url = escapeHtml(payload.accountUrl || `${process.env.APP_URL}/#conta`);
     return {
-      subject: `Pedido ${orderId} recebido · Aether Studio`,
+      subject: `Pedido ${orderId} aguardando pagamento · Aether Studio`,
       text: `Olá, ${payload.name}. Recebemos seu pedido ${orderId}, no total de ${total}. Ele aguarda o pagamento. Acesse sua conta para continuar: ${payload.accountUrl}`,
       html: emailLayout('Pedido recebido', `<p>Olá, ${name}. Seu pedido <strong>#${orderId}</strong> foi criado e aguarda o pagamento.</p><p>Total: <strong>${total}</strong></p><p><a href="${url}" style="display:inline-block;padding:14px 20px;background:#d6bc98;color:#17120e;text-decoration:none">Acompanhar pedido</a></p>`),
     };
@@ -58,11 +58,14 @@ function renderEmail(template, payload) {
 
   if (template === 'payment-update') {
     const status = escapeHtml(payload.statusLabel);
+    const isApproved = payload.paymentStatus === 'approved';
     const refunded = payload.refundedCents > 0 ? `<p>Valor reembolsado: <strong>${brl(payload.refundedCents)}</strong></p>` : '';
     return {
-      subject: `Atualização do pedido ${orderId} · Aether Studio`,
-      text: `Olá, ${payload.name}. O pagamento do pedido ${orderId} está com o status: ${payload.statusLabel}. Valor: ${total}. Acompanhe em ${process.env.APP_URL}/#conta.`,
-      html: emailLayout('Atualização do pagamento', `<p>Olá, ${name}. O pagamento do pedido <strong>#${orderId}</strong> foi atualizado.</p><p>Status: <strong>${status}</strong></p><p>Total: <strong>${total}</strong></p>${refunded}<p>Acompanhe seus pedidos na sua conta da loja.</p>`),
+      subject: isApproved ? `Pedido ${orderId} confirmado · Aether Studio` : `Atualização do pedido ${orderId} · Aether Studio`,
+      text: isApproved
+        ? `Olá, ${payload.name}. O pagamento do pedido ${orderId} foi aprovado e seu pedido está confirmado. Total: ${total}. Acompanhe as próximas etapas em ${process.env.APP_URL}/#conta.`
+        : `Olá, ${payload.name}. O pagamento do pedido ${orderId} está com o status: ${payload.statusLabel}. Valor: ${total}. Acompanhe em ${process.env.APP_URL}/#conta.`,
+      html: emailLayout(isApproved ? 'Pedido confirmado' : 'Atualização do pagamento', `<p>Olá, ${name}. ${isApproved ? `O pagamento do pedido <strong>#${orderId}</strong> foi aprovado. Seu pedido está confirmado e seguirá para preparação.` : `O pagamento do pedido <strong>#${orderId}</strong> foi atualizado.`}</p><p>Status: <strong>${status}</strong></p><p>Total: <strong>${total}</strong></p>${refunded}<p>Acompanhe as próximas etapas na sua conta da loja.</p>`),
     };
   }
 
