@@ -217,6 +217,10 @@ function productDto(row) {
 }
 
 function orderDto(order, items) {
+  const reservationExpiresAt = order.reservation_expires_at ? new Date(order.reservation_expires_at) : null;
+  const reservationActive = reservationExpiresAt && reservationExpiresAt.getTime() > Date.now();
+  const paymentIsRetryable = !order.payment_id || ['rejected', 'cancelled'].includes(order.payment_status);
+  const isPendingPix = order.payment_id && order.payment_attempt_method === 'pix' && order.payment_status === 'pending';
   return {
     id: order.id,
     status: order.status,
@@ -225,6 +229,8 @@ function orderDto(order, items) {
     fulfillmentStatus: order.fulfillment_status || 'not_paid',
     trackingCode: order.tracking_code || null,
     totalCents: Number(order.total_cents),
+    reservationExpiresAt: reservationExpiresAt?.toISOString() || null,
+    canResumePayment: order.status === 'pending_payment' && Boolean(reservationActive) && (paymentIsRetryable || isPendingPix),
     shippingAddress: order.shipping_address,
     createdAt: order.created_at,
     items: items.map((item) => ({
@@ -579,6 +585,7 @@ async function applyMercadoPagoPayment(client, order, payment) {
 function directPaymentDto(payment) {
   const data = payment.point_of_interaction?.transaction_data;
   return { paymentId: String(payment.id), status: payment.status, statusDetail: payment.status_detail || null,
+    paymentMethod: payment.payment_method_id || null,
     qrCode: data?.qr_code || null, qrCodeBase64: data?.qr_code_base64 || null,
     ticketUrl: data?.ticket_url || null, expirationDate: payment.date_of_expiration || null };
 }
@@ -715,9 +722,33 @@ app.post('/api/orders/:id/payment', requireUser, checkoutLimiter, async (req, re
 
 app.get('/api/orders/:id/payment', requireUser, async (req, res) => {
   if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return res.sendStatus(404);
-  const { rows: [order] } = await pool.query('SELECT payment_id FROM orders WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
-  if (!order?.payment_id) return res.sendStatus(404);
-  res.json(directPaymentDto(await getPayment(order.payment_id)));
+  const { rows: [order] } = await pool.query(
+    'SELECT id,status,payment_status,payment_id,payment_attempt_key,payment_attempt_method,reservation_expires_at,total_cents FROM orders WHERE id=$1 AND user_id=$2',
+    [req.params.id, req.user.id],
+  );
+  if (!order) return res.sendStatus(404);
+  const reservationActive = order.status === 'pending_payment' && new Date(order.reservation_expires_at).getTime() > Date.now();
+  const canStartPayment = reservationActive && (!order.payment_id || ['rejected', 'cancelled'].includes(order.payment_status));
+  let payment = null;
+  if (order.payment_id) {
+    const currentPayment = await getPayment(order.payment_id);
+    if (currentPayment.external_reference !== order.id || String(currentPayment.id) !== String(order.payment_id)) {
+      console.error(`[aether] Payment lookup did not match order ${order.id}.`);
+      return res.status(502).json({ error: 'Não foi possível consultar o pagamento agora.' });
+    }
+    payment = directPaymentDto(currentPayment);
+  }
+  const canResumePayment = canStartPayment || (reservationActive && payment?.paymentMethod === 'pix' && payment.status === 'pending');
+  res.json({
+    orderId: order.id,
+    totalCents: Number(order.total_cents),
+    reservationExpiresAt: order.reservation_expires_at,
+    canResumePayment,
+    canStartPayment,
+    paymentMethod: order.payment_attempt_method,
+    idempotencyKey: canStartPayment ? order.payment_attempt_key : null,
+    payment: canResumePayment && payment?.paymentMethod === 'pix' ? payment : null,
+  });
 });
 
 app.post('/api/payments/webhook', async (req, res) => {

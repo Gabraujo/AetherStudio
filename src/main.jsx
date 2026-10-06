@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ArrowRight, Camera, Check, Mail, Menu, Minus, Plus, Search, ShoppingBag, UserRound, X } from 'lucide-react';
+import { ArrowRight, Camera, Check, ChevronDown, Mail, Menu, Minus, Plus, Search, ShoppingBag, UserRound, X } from 'lucide-react';
 import AdminPanel from './AdminPanel.jsx';
 import { api } from './api.js';
 import './style.css';
@@ -190,6 +190,8 @@ function App() {
   const [modal, setModal] = useState('');
   const [authMode, setAuthMode] = useState('login');
   const [orders, setOrders] = useState([]);
+  const [expandedOrderId, setExpandedOrderId] = useState(null);
+  const [resumingOrderId, setResumingOrderId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [paymentsEnabled, setPaymentsEnabled] = useState(false);
   const [mercadoPagoPublicKey, setMercadoPagoPublicKey] = useState('');
@@ -373,6 +375,33 @@ function App() {
       setOrders(await api('/api/orders'));
     } catch (error) {
       notify(error.message, 'error');
+    }
+  }
+
+  async function resumeOrderPayment(order) {
+    setResumingOrderId(order.id);
+    try {
+      const paymentState = await api(`/api/orders/${order.id}/payment`);
+      if (!paymentState.canResumePayment) {
+        setOrders(await api('/api/orders'));
+        notify('Este pedido não pode mais receber pagamento. Confira o status atualizado na sua conta.', 'error');
+        return;
+      }
+      setCheckoutOrder({
+        orderId: order.id,
+        totalCents: paymentState.totalCents,
+        totalLabel: money(paymentState.totalCents),
+        expiresAt: paymentState.reservationExpiresAt,
+        initialPayment: paymentState.payment,
+        initialPaymentMethod: paymentState.paymentMethod || paymentState.payment?.paymentMethod || 'pix',
+        idempotencyKey: paymentState.idempotencyKey,
+        canStartPayment: paymentState.canStartPayment,
+      });
+      setModal('checkout');
+    } catch (error) {
+      notify(error.message, 'error');
+    } finally {
+      setResumingOrderId(null);
     }
   }
 
@@ -579,7 +608,7 @@ function App() {
           <button className="switch-auth" onClick={()=>setAuthMode(authMode==='login'?'register':'login')}>{authMode==='login'?'Ainda não tem conta? Criar conta':'Já tem uma conta? Entrar'}</button><small className="checkout-note">Sua sessão é protegida e os pedidos ficam vinculados a esta conta.</small>
         </>}
 
-        {modal==='account'&&<><div className="eyebrow">ÁREA DO CLIENTE</div><h2>Olá, {user?.name?.split(' ')[0]}<span>.</span></h2><p>{user?.email}</p>{user?.isAdmin&&<button className="add-button admin-open" onClick={()=>setModal('admin')}>Abrir painel de catálogo <ArrowRight size={16}/></button>}<div className="account-section"><div className="account-section-heading"><h3>Meus pedidos</h3><span>{orders.length}</span></div>{orders.length===0?<p className="empty-orders">Seus pedidos e atualizações de pagamento aparecerão aqui.</p>:orders.map((order)=><article className="order-card" key={order.id}><div className="order-title"><b>Pedido #{order.id.slice(0,8).toUpperCase()}</b><span className={`order-status ${order.status}`}>{statusLabel[order.status]||order.status}</span></div><small>{new Date(order.createdAt).toLocaleDateString('pt-BR')} · {money(order.totalCents)}</small><small className="payment-status-detail">Entrega: {fulfillmentLabel[order.fulfillmentStatus] || fulfillmentLabel.not_paid}{order.trackingCode && <> · Rastreio {order.trackingCode}</>}</small>{paymentStatusLabel[order.paymentStatus]&&<small className="payment-status-detail">{paymentStatusLabel[order.paymentStatus]}{order.refundedCents>0?` · Reembolsado: ${money(order.refundedCents)}`:''}</small>}<div className="order-lines">{order.items.map((item,index)=><span key={`${order.id}-${index}`}>{item.quantity}× {item.productName}</span>)}</div><small className="order-address">Entrega: {order.shippingAddress.street}, {order.shippingAddress.number} · {order.shippingAddress.city}/{order.shippingAddress.state} · CEP {order.shippingAddress.postalCode}</small></article>)}<form className="password-form" onSubmit={changePassword}><h3>Segurança da conta</h3><label>Senha atual<input type="password" required value={currentPassword} onChange={event=>setCurrentPassword(event.target.value)} autoComplete="current-password"/></label><label>Nova senha<input type="password" required minLength="10" value={newPassword} onChange={event=>setNewPassword(event.target.value)} autoComplete="new-password"/></label><button className="secondary" disabled={busy}>{busy?'Salvando...':'Alterar senha'}</button></form><button className="text-button logout" onClick={logout}>Sair da conta</button></div></>}
+        {modal==='account'&&<><div className="eyebrow">ÁREA DO CLIENTE</div><h2>Olá, {user?.name?.split(' ')[0]}<span>.</span></h2><p>{user?.email}</p>{user?.isAdmin&&<button className="add-button admin-open" onClick={()=>setModal('admin')}>Abrir painel de catálogo <ArrowRight size={16}/></button>}<div className="account-section"><div className="account-section-heading"><h3>Meus pedidos</h3><span>{orders.length}</span></div>{orders.length===0?<p className="empty-orders">Seus pedidos e atualizações de pagamento aparecerão aqui.</p>:orders.map((order)=>{const expanded=expandedOrderId===order.id;const paid=['paid','paid_after_expiry'].includes(order.status)||order.paymentStatus==='approved';const stopped=['cancelled','expired','checkout_error'].includes(order.status);const currentStep=!paid?1:order.fulfillmentStatus==='delivered'?4:order.fulfillmentStatus==='shipped'?3:2;const steps=['Pedido criado','Pagamento aprovado','Em preparação','Enviado','Entregue'];return <article className={`order-card ${expanded?'expanded':''}`} key={order.id}><button type="button" className="order-toggle" aria-expanded={expanded} onClick={()=>setExpandedOrderId(expanded?null:order.id)}><span><b>Pedido #{order.id.slice(0,8).toUpperCase()}</b><small>{new Date(order.createdAt).toLocaleDateString('pt-BR')} · {money(order.totalCents)}</small></span><span className={`order-status ${order.status}`}>{statusLabel[order.status]||order.status}</span><ChevronDown size={16} aria-hidden="true"/></button>{expanded&&<div className="order-details"><small className="payment-status-detail">Pagamento: {paymentStatusLabel[order.paymentStatus]|| (paid?'Pagamento aprovado':'Aguardando pagamento')}{order.refundedCents>0?` · Reembolsado: ${money(order.refundedCents)}`:''}</small>{stopped?<p className="order-closed-state">{order.status==='cancelled'?'Este pedido foi cancelado.':order.status==='expired'?'O prazo para pagamento expirou.':'O pagamento não foi iniciado.'}</p>:<ol className="order-timeline" aria-label={`Etapas do pedido ${order.id.slice(0,8).toUpperCase()}`}>{steps.map((step,index)=><li className={index<currentStep?'complete':index===currentStep?'current':'upcoming'} key={step}><span className="timeline-marker" aria-hidden="true">{index<currentStep?'✓':index+1}</span><span>{step}{index===1&&!paid&&<small>Aguardando a confirmação do pagamento</small>}{index===2&&order.fulfillmentStatus==='processing'&&<small>Estamos preparando seu pedido</small>}{index===3&&order.fulfillmentStatus==='shipped'&&order.trackingCode&&<small>Código de rastreio: {order.trackingCode}</small>}{index===4&&order.fulfillmentStatus==='delivered'&&<small>Pedido entregue</small>}</span></li>)}</ol>}<div className="order-lines">{order.items.map((item,index)=><span key={`${order.id}-${index}`}>{item.quantity}× {item.productName}<b>{money(item.unitPriceCents*item.quantity)}</b></span>)}</div><small className="order-address">Entrega: {order.shippingAddress.street}, {order.shippingAddress.number}{order.shippingAddress.district?` · ${order.shippingAddress.district}`:''} · {order.shippingAddress.city}/{order.shippingAddress.state} · CEP {order.shippingAddress.postalCode}</small>{order.canResumePayment&&<button type="button" className="add-button order-pay-button" disabled={resumingOrderId===order.id} onClick={()=>resumeOrderPayment(order)}>{resumingOrderId===order.id?'Abrindo pagamento...':order.paymentStatus==='pending'&&order.status==='pending_payment'?'Continuar para pagamento':'Concluir pagamento'}</button>}</div>}</article>})}<form className="password-form" onSubmit={changePassword}><h3>Segurança da conta</h3><label>Senha atual<input type="password" required value={currentPassword} onChange={event=>setCurrentPassword(event.target.value)} autoComplete="current-password"/></label><label>Nova senha<input type="password" required minLength="10" value={newPassword} onChange={event=>setNewPassword(event.target.value)} autoComplete="new-password"/></label><button className="secondary" disabled={busy}>{busy?'Salvando...':'Alterar senha'}</button></form><button className="text-button logout" onClick={logout}>Sair da conta</button></div></>}
 
         {modal==='checkout'&&<>
           <div className="eyebrow">ENTREGA E PAGAMENTO</div><h2>Finalize seu pedido<span>.</span></h2>
