@@ -575,7 +575,7 @@ async function applyMercadoPagoPayment(client, order, payment) {
     if (customer) await enqueueEmail(client, {
       eventKey: `payment-update:${paymentId}:${paymentState.paymentStatus}:${paymentState.refundedCents}`,
       recipient: customer.email, template: 'payment-update',
-      payload: { name: customer.name, orderId: order.id, totalCents: order.total_cents,
+      payload: { name: customer.name, orderId: order.id, totalCents: order.total_cents, paymentStatus: paymentState.paymentStatus,
         refundedCents: paymentState.refundedCents, statusLabel: paymentStatusLabels[paymentState.paymentStatus] || paymentStatusLabels.unknown },
     });
   }
@@ -826,6 +826,7 @@ app.post('/api/payments/webhook', async (req, res) => {
             name: customer.name,
             orderId,
             totalCents: order.total_cents,
+            paymentStatus: paymentState.paymentStatus,
             refundedCents: paymentState.refundedCents,
             statusLabel: statusLabels[paymentState.paymentStatus] || statusLabels.unknown,
           },
