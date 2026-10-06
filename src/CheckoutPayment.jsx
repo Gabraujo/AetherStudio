@@ -9,16 +9,16 @@ const statusText = {
   authorized: 'Pagamento autorizado e em processamento.',
 };
 
-export default function CheckoutPayment({ order, publicKey, email, onPaid }) {
+export default function CheckoutPayment({ order, publicKey, email, onPaid, initialPayment, initialPaymentMethod, idempotencyKey }) {
   const [sdkReady, setSdkReady] = useState(false);
   const [cardBrickReady, setCardBrickReady] = useState(false);
   const [cardLoadError, setCardLoadError] = useState('');
   const [cardAttempt, setCardAttempt] = useState(0);
-  const [method, setMethod] = useState('pix');
-  const [pix, setPix] = useState(null);
+  const [method, setMethod] = useState(initialPayment?.paymentMethod === 'pix' || initialPaymentMethod === 'pix' ? 'pix' : initialPaymentMethod || 'pix');
+  const [pix, setPix] = useState(initialPayment?.paymentMethod === 'pix' && initialPayment.status === 'pending' ? initialPayment : null);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
-  const attemptKeys = useRef({});
+  const attemptKeys = useRef(idempotencyKey && initialPaymentMethod ? { [initialPaymentMethod]: idempotencyKey } : {});
   const onPaidRef = useRef(onPaid);
   onPaidRef.current = onPaid;
   const cardBrickReadyRef = useRef(false);
