@@ -142,6 +142,9 @@ const productSchema = z.object({
 const featuredProductsSchema = z.object({
   productIds: z.array(z.string().uuid()).max(4).refine((ids) => new Set(ids).size === ids.length, 'Não repita figures nos destaques.'),
 });
+const catalogOrderSchema = z.object({
+  productIds: z.array(z.string().uuid()).max(5000).refine((ids) => new Set(ids).size === ids.length, 'Não repita figures na ordem do catálogo.'),
+});
 const shippingSchema = z.object({
   street: z.string().trim().min(2).max(160),
   number: z.string().trim().min(1).max(20),
@@ -212,6 +215,7 @@ function productDto(row) {
     imageUrl: row.image_url,
     active: row.active,
     featuredPosition: row.featured_position === null ? null : Number(row.featured_position),
+    catalogPosition: Number(row.catalog_position),
     createdAt: row.created_at,
   };
 }
@@ -266,7 +270,7 @@ app.post('/api/newsletter', async (req, res) => {
 });
 
 app.get('/api/products', async (_req, res) => {
-  const { rows } = await pool.query('SELECT * FROM products WHERE active = TRUE ORDER BY created_at DESC, name ASC');
+  const { rows } = await pool.query('SELECT * FROM products WHERE active = TRUE ORDER BY catalog_position ASC');
   res.json(rows.map(productDto));
 });
 
@@ -845,8 +849,33 @@ app.post('/api/payments/webhook', async (req, res) => {
 });
 
 app.get('/api/admin/products', requireUser, requireAdmin, async (_req, res) => {
-  const { rows } = await pool.query('SELECT * FROM products ORDER BY created_at DESC, name ASC');
+  const { rows } = await pool.query('SELECT * FROM products ORDER BY catalog_position ASC');
   res.json(rows.map(productDto));
+});
+
+app.put('/api/admin/catalog-order', requireUser, requireAdmin, async (req, res) => {
+  const { productIds } = parse(catalogOrderSchema, req.body);
+  await inTransaction(async (client) => {
+    await client.query('SELECT pg_advisory_xact_lock(731904251)');
+    const { rows } = await client.query('SELECT id FROM products ORDER BY catalog_position FOR UPDATE');
+    const requestedIds = new Set(productIds);
+    if (rows.length !== productIds.length || rows.some((product) => !requestedIds.has(product.id))) {
+      const error = new Error('O catálogo mudou enquanto você organizava. Atualize a lista e tente novamente.');
+      error.status = 409;
+      throw error;
+    }
+    await client.query(
+      `UPDATE products AS product
+       SET catalog_position = ordering.position, updated_at = NOW()
+       FROM (
+         SELECT product_id, ordinality::INTEGER AS position
+         FROM unnest($1::uuid[]) WITH ORDINALITY AS ordered(product_id, ordinality)
+       ) AS ordering
+       WHERE product.id = ordering.product_id`,
+      [productIds],
+    );
+  });
+  res.json({ productIds });
 });
 
 app.put('/api/admin/featured', requireUser, requireAdmin, async (req, res) => {
@@ -882,11 +911,15 @@ app.post('/api/admin/products', requireUser, requireAdmin, async (req, res) => {
     return res.status(400).json({ error: 'Envie uma imagem ou use um endereço HTTPS.' });
   }
   const id = randomUUID();
-  const { rows } = await pool.query(
-    `INSERT INTO products (id, name, category, description, price_cents, compare_at_cents, stock, image_url, active)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text, $9::boolean) RETURNING *`,
-    [id, data.name, data.category, data.description, data.priceCents, data.compareAtCents, data.stock, data.imageUrl, data.active],
-  );
+  const { rows } = await inTransaction(async (client) => {
+    await client.query('SELECT pg_advisory_xact_lock(731904251)');
+    const { rows: [position] } = await client.query('SELECT COALESCE(MAX(catalog_position), 0) + 1 AS next_position FROM products');
+    return client.query(
+      `INSERT INTO products (id, name, category, description, price_cents, compare_at_cents, stock, image_url, active, catalog_position)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text, $9::boolean, $10) RETURNING *`,
+      [id, data.name, data.category, data.description, data.priceCents, data.compareAtCents, data.stock, data.imageUrl, data.active, Number(position.next_position)],
+    );
+  });
   res.status(201).json(productDto(rows[0]));
 });
 

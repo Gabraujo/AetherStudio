@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Archive, ArrowLeft, Ban, ImagePlus, PackageCheck, Pencil, Plus, RotateCcw, Save, ShoppingBag, Star, Trash2, X } from 'lucide-react';
+import { Archive, ArrowDown, ArrowLeft, ArrowUp, Ban, ImagePlus, PackageCheck, Pencil, Plus, RotateCcw, Save, ShoppingBag, Star, Trash2, X } from 'lucide-react';
 import { api } from './api.js';
 
 const emptyForm = {
@@ -38,6 +38,7 @@ const fulfillmentStatuses = {
 
 export default function AdminPanel({ onClose, onChanged, notify }) {
   const [products, setProducts] = useState([]);
+  const [catalogOrderIds, setCatalogOrderIds] = useState([]);
   const [featuredIds, setFeaturedIds] = useState([]);
   const [orders, setOrders] = useState([]);
   const [form, setForm] = useState(emptyForm);
@@ -49,6 +50,7 @@ export default function AdminPanel({ onClose, onChanged, notify }) {
   const [loading, setLoading] = useState(true);
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [featuredSaving, setFeaturedSaving] = useState(false);
+  const [catalogOrderSaving, setCatalogOrderSaving] = useState(false);
   const [trackingCodes, setTrackingCodes] = useState({});
   const [fulfillmentSelections, setFulfillmentSelections] = useState({});
   const [updatingOrderId, setUpdatingOrderId] = useState(null);
@@ -58,6 +60,7 @@ export default function AdminPanel({ onClose, onChanged, notify }) {
     try {
       const catalog = await api('/api/admin/products');
       setProducts(catalog);
+      setCatalogOrderIds(catalog.map((product) => product.id));
       setFeaturedIds(catalog.filter((product) => product.featuredPosition)
         .sort((a, b) => a.featuredPosition - b.featuredPosition)
         .map((product) => product.id));
@@ -66,6 +69,35 @@ export default function AdminPanel({ onClose, onChanged, notify }) {
     } finally {
       setLoading(false);
     }
+  }
+
+  function moveCatalogProduct(productId, offset) {
+    const currentOrder = catalogOrderIds.length ? catalogOrderIds : products.map((product) => product.id);
+    const from = currentOrder.indexOf(productId);
+    const to = from + offset;
+    if (from < 0 || to < 0 || to >= currentOrder.length) return;
+    const nextOrder = [...currentOrder];
+    [nextOrder[from], nextOrder[to]] = [nextOrder[to], nextOrder[from]];
+    setCatalogOrderIds(nextOrder);
+  }
+
+  async function saveCatalogOrder() {
+    setCatalogOrderSaving(true);
+    try {
+      await api('/api/admin/catalog-order', { method: 'PUT', body: { productIds: catalogOrderIds } });
+      notify('Ordem do catálogo salva.');
+      await refresh();
+      onChanged();
+    } catch (error) {
+      if (error.status === 409) await refresh();
+      notify(error.message, 'error');
+    } finally {
+      setCatalogOrderSaving(false);
+    }
+  }
+
+  function resetCatalogOrder() {
+    setCatalogOrderIds(products.map((product) => product.id));
   }
 
   function toggleFeatured(product) {
@@ -173,6 +205,11 @@ export default function AdminPanel({ onClose, onChanged, notify }) {
     .map((product) => product.id);
   const featuredChanged = featuredIds.length !== savedFeaturedIds.length
     || featuredIds.some((id, index) => id !== savedFeaturedIds[index]);
+  const savedCatalogOrderIds = products.map((product) => product.id);
+  const catalogOrderChanged = catalogOrderIds.length === savedCatalogOrderIds.length
+    && catalogOrderIds.some((id, index) => id !== savedCatalogOrderIds[index]);
+  const orderedProducts = [...products].sort((first, second) =>
+    catalogOrderIds.indexOf(first.id) - catalogOrderIds.indexOf(second.id));
   const isClosedOrder = (order) => ['cancelled', 'expired', 'checkout_error'].includes(order.status)
     || order.fulfillmentStatus === 'delivered'
     || ['refunded', 'charged_back'].includes(order.paymentStatus);
@@ -340,10 +377,11 @@ export default function AdminPanel({ onClose, onChanged, notify }) {
       </form>
 
       <div className="admin-list-heading"><h2>Figures cadastradas</h2><span>{products.filter((product) => product.active).length} ativas</span></div>
-      {loading ? <p className="admin-empty">Carregando catálogo...</p> : products.length === 0 ? <p className="admin-empty">Nenhuma figure cadastrada.</p> : <div className="admin-list">{products.map((product) => <article className={`admin-product ${product.active ? '' : 'archived'}`} key={product.id}>
+      <div className="catalog-order-controls"><p>Use as setas para escolher a ordem em que as figures aparecem na vitrine.</p><div><button type="button" className="secondary" disabled={!catalogOrderChanged || catalogOrderSaving || loading} onClick={resetCatalogOrder}>Descartar</button><button type="button" className="add-button" disabled={!catalogOrderChanged || catalogOrderSaving || loading} onClick={saveCatalogOrder}>{catalogOrderSaving ? 'Salvando ordem...' : 'Salvar ordem'}</button></div></div>
+      {loading ? <p className="admin-empty">Carregando catálogo...</p> : products.length === 0 ? <p className="admin-empty">Nenhuma figure cadastrada.</p> : <div className="admin-list">{orderedProducts.map((product, index) => <article className={`admin-product ${product.active ? '' : 'archived'}`} key={product.id}>
         <div className={`admin-thumb ${product.category.toLowerCase()}`}>{product.imageUrl ? <img src={product.imageUrl} alt=""/> : <span className="sphere"/>}</div>
         <div className="admin-product-copy"><small>{product.category} · {product.active ? 'ATIVA' : 'FORA DO CATÁLOGO'}</small><b>{product.name}</b><span>{money(product.priceCents)} · {product.stock} em estoque</span></div>
-        <div className="admin-product-actions"><button className="icon-button" onClick={() => edit(product)} aria-label={`Editar ${product.name}`}><Pencil size={16}/></button>{product.active ? <button className="icon-button danger" onClick={() => archive(product)} aria-label={`Remover ${product.name} do catalogo`}><Archive size={16}/></button> : <button className="icon-button" onClick={() => restore(product)} aria-label={`Restaurar ${product.name}`}><RotateCcw size={16}/></button>}<button className="icon-button danger" onClick={() => destroyProduct(product)} aria-label={`Excluir permanentemente ${product.name}`} title="Excluir permanentemente"><Trash2 size={16}/></button></div>
+        <div className="admin-product-actions"><button type="button" className="icon-button" disabled={index===0||catalogOrderSaving} onClick={()=>moveCatalogProduct(product.id,-1)} aria-label={`Mover ${product.name} para cima`} title="Mover para cima"><ArrowUp size={15}/></button><button type="button" className="icon-button" disabled={index===orderedProducts.length-1||catalogOrderSaving} onClick={()=>moveCatalogProduct(product.id,1)} aria-label={`Mover ${product.name} para baixo`} title="Mover para baixo"><ArrowDown size={15}/></button><button type="button" className="icon-button" disabled={catalogOrderSaving} onClick={() => edit(product)} aria-label={`Editar ${product.name}`}><Pencil size={16}/></button>{product.active ? <button type="button" className="icon-button danger" disabled={catalogOrderSaving} onClick={() => archive(product)} aria-label={`Remover ${product.name} do catalogo`}><Archive size={16}/></button> : <button type="button" className="icon-button" disabled={catalogOrderSaving} onClick={() => restore(product)} aria-label={`Restaurar ${product.name}`}><RotateCcw size={16}/></button>}<button type="button" className="icon-button danger" disabled={catalogOrderSaving} onClick={() => destroyProduct(product)} aria-label={`Excluir permanentemente ${product.name}`} title="Excluir permanentemente"><Trash2 size={16}/></button></div>
       </article>)}</div>}
     </>}
 
