@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ArrowRight, Camera, Check, ChevronDown, Mail, Menu, Minus, Plus, Search, ShoppingBag, UserRound, X } from 'lucide-react';
 import AdminPanel from './AdminPanel.jsx';
@@ -625,7 +625,7 @@ function App() {
               {!paymentsEnabled&&<small className="checkout-note">A finalização online estará disponível em breve.</small>}
             </form>
           </> : <>
-            <React.Suspense fallback={<p className="payment-feedback" role="status">Carregando pagamento seguro…</p>}><CheckoutPayment order={checkoutOrder} publicKey={mercadoPagoPublicKey} email={user?.email} initialPayment={checkoutOrder.initialPayment} initialPaymentMethod={checkoutOrder.initialPaymentMethod} idempotencyKey={checkoutOrder.idempotencyKey} onPaid={()=>{setCart([]);api('/api/orders').then(setOrders).catch((error)=>notify(error.message,'error'));}} /></React.Suspense>
+             <React.Suspense fallback={<p className="payment-feedback" role="status">Carregando pagamento seguro…</p>}><CheckoutPayment order={checkoutOrder} publicKey={mercadoPagoPublicKey} email={user?.email} initialPayment={checkoutOrder.initialPayment} initialPaymentMethod={checkoutOrder.initialPaymentMethod} idempotencyKey={checkoutOrder.idempotencyKey} onPaid={()=>{setCart([]);api('/api/orders').then(setOrders).catch((error)=>notify(error.message,'error'));}} /></React.Suspense>
             <button type="button" className="text-button" onClick={()=>setCheckoutOrder(null)}>Voltar ao endereço</button>
           </>}
         </>}      </section>
